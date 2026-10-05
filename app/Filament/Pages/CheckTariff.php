@@ -6,6 +6,7 @@ use App\Models\ExpeditionRateCard;
 use App\Models\TariffSearchHistory;
 use App\Services\FreightRateGoogleSheetService;
 use BackedEnum;
+use BezhanSalleh\FilamentShield\Traits\HasPageShield;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -20,6 +21,8 @@ use Illuminate\Database\Eloquent\Collection;
 
 class CheckTariff extends Page
 {
+    use HasPageShield;
+
     protected string $view = 'filament.pages.check-tariff';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCalculator;

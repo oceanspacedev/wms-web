@@ -9,6 +9,7 @@ use App\Services\FreightRateGoogleSheetService;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -29,6 +30,7 @@ class CheckTariffTest extends TestCase
 
         $this->user = User::factory()->create();
         $this->user->assignRole($role);
+        $this->grantCheckTariffAccess($this->user);
     }
 
     public function test_guest_is_redirected_from_check_tariff_page(): void
@@ -43,6 +45,26 @@ class CheckTariffTest extends TestCase
         $response = $this->actingAs($this->user)->get('/admin/check-tariff');
 
         $response->assertStatus(200);
+        $response->assertSee('Cek Tarif Ekspedisi');
+    }
+
+    public function test_panel_user_without_check_tariff_permission_is_forbidden(): void
+    {
+        $user = $this->panelUser();
+
+        $response = $this->actingAs($user)->get('/admin/check-tariff');
+
+        $response->assertForbidden();
+    }
+
+    public function test_panel_user_with_check_tariff_permission_can_access_the_page(): void
+    {
+        $user = $this->panelUser();
+        $this->grantCheckTariffAccess($user);
+
+        $response = $this->actingAs($user)->get('/admin/check-tariff');
+
+        $response->assertOk();
         $response->assertSee('Cek Tarif Ekspedisi');
     }
 
@@ -303,5 +325,23 @@ class CheckTariffTest extends TestCase
         foreach ($rates as $r) {
             $this->assertNotSame('UDARA', $r['service']);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function panelUser(array $attributes = []): User
+    {
+        $role = Role::findOrCreate('panel_user', 'web');
+        $user = User::factory()->create($attributes);
+        $user->assignRole($role);
+
+        return $user;
+    }
+
+    private function grantCheckTariffAccess(User $user): void
+    {
+        $permission = Permission::findOrCreate('View:CheckTariff', 'web');
+        $user->givePermissionTo($permission);
     }
 }

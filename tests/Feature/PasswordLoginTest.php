@@ -16,8 +16,8 @@ class PasswordLoginTest extends TestCase
     public function test_login_page_shows_username_email_and_whatsapp_entry_when_wag_configured(): void
     {
         config([
-            'services.wag.url' => 'https://api.whatsapp.test',
-            'services.wag.token' => 'dummy-token',
+            'services.whatsapp_gateway.url' => 'https://api.whatsapp.test',
+            'services.whatsapp_gateway.token' => 'dummy-token',
         ]);
 
         $response = $this->get('/admin/login');
@@ -33,8 +33,8 @@ class PasswordLoginTest extends TestCase
     public function test_login_page_hides_whatsapp_entry_when_wag_not_configured(): void
     {
         config([
-            'services.wag.url' => null,
-            'services.wag.token' => null,
+            'services.whatsapp_gateway.url' => null,
+            'services.whatsapp_gateway.token' => null,
         ]);
 
         $response = $this->get('/admin/login');

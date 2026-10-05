@@ -31,6 +31,19 @@ class DashboardMonitoringTest extends TestCase
         $response->assertStatus(200);
     }
 
+    public function test_log_viewer_folders_api_uses_the_session_for_same_origin_requests(): void
+    {
+        $this->seed();
+
+        $admin = User::where('email', 'admin@example.com')->firstOrFail();
+
+        $response = $this->actingAs($admin)
+            ->withHeader('Referer', 'http://whms-web.test/log-viewer')
+            ->getJson('/log-viewer/api/folders?direction=desc');
+
+        $response->assertOk();
+    }
+
     public function test_horizon_dashboard_is_forbidden_by_default_in_non_local_environment(): void
     {
         $response = $this->get('/horizon');

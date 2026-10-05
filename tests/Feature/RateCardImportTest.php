@@ -35,7 +35,11 @@ class RateCardImportTest extends TestCase
             'name' => 'ViewAny:ExpeditionRateCard',
             'guard_name' => 'web',
         ]);
-        $role->givePermissionTo('ViewAny:ExpeditionRateCard');
+        Permission::firstOrCreate([
+            'name' => 'View:CheckTariff',
+            'guard_name' => 'web',
+        ]);
+        $role->givePermissionTo(['ViewAny:ExpeditionRateCard', 'View:CheckTariff']);
 
         $this->user = User::factory()->create();
         $this->user->assignRole($role);
