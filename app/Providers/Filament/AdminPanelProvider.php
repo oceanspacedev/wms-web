@@ -10,10 +10,12 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationItem;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Icons\Heroicon;
 use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
@@ -60,6 +62,39 @@ class AdminPanelProvider extends PanelProvider
                 'Ekspedisi',
                 'Audit',
                 'Filament Shield',
+                'Developer & Tools',
+            ])
+            ->navigationItems([
+                NavigationItem::make('API Documentation')
+                    ->url('/docs/api', shouldOpenInNewTab: true)
+                    ->icon(Heroicon::OutlinedCodeBracketSquare)
+                    ->group('Developer & Tools')
+                    ->visible(fn (): bool => auth()->user()?->hasRole('super_admin')
+                        || (auth()->user()?->can('ViewApiDocs') ?? false)
+                        || (auth()->user()?->can('view_api_docs') ?? false)
+                        || (auth()->user()?->can('ViewScramble') ?? false)
+                    )
+                    ->sort(1),
+
+                NavigationItem::make('Laravel Horizon')
+                    ->url('/horizon', shouldOpenInNewTab: true)
+                    ->icon(Heroicon::OutlinedCpuChip)
+                    ->group('Developer & Tools')
+                    ->visible(fn (): bool => auth()->user()?->hasRole('super_admin')
+                        || (auth()->user()?->can('ViewHorizon') ?? false)
+                        || (auth()->user()?->can('view_horizon') ?? false)
+                    )
+                    ->sort(2),
+
+                NavigationItem::make('Log Viewer')
+                    ->url('/log-viewer', shouldOpenInNewTab: true)
+                    ->icon(Heroicon::OutlinedDocumentMagnifyingGlass)
+                    ->group('Developer & Tools')
+                    ->visible(fn (): bool => auth()->user()?->hasRole('super_admin')
+                        || (auth()->user()?->can('ViewLogViewer') ?? false)
+                        || (auth()->user()?->can('view_log_viewer') ?? false)
+                    )
+                    ->sort(3),
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
             ->widgets([

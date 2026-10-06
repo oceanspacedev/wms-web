@@ -38,5 +38,17 @@ class AppServiceProvider extends ServiceProvider
                 || $user?->can('View:LogViewer')
             );
         });
+
+        Gate::define('viewApiDocs', function ($user = null): bool {
+            return (bool) (
+                app()->environment('local', 'testing')
+                || $user?->hasRole('super_admin')
+                || $user?->can('ViewApiDocs')
+                || $user?->can('view_api_docs')
+                || $user?->can('View:ApiDocs')
+                || $user?->can('ViewScramble')
+                || $user?->can('view_scramble')
+            );
+        });
     }
 }

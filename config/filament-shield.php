@@ -255,6 +255,7 @@ return [
     'custom_permissions' => [
         'view_horizon',
         'view_log_viewer',
+        'view_api_docs',
         'impersonate_user',
     ],
 
