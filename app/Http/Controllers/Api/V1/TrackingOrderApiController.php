@@ -8,6 +8,9 @@ use App\Http\Requests\Api\V1\SubmitPodRequest;
 use App\Http\Resources\Api\V1\TrackingOrderResource;
 use App\Models\TrackingOrder;
 use App\Services\PodLocationService;
+use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
+use Dedoc\Scramble\Attributes\QueryParameter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -15,21 +18,22 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
+#[Group('Surat Jalan', 'Akses data tracking order / surat jalan dan POD kurir.', 3)]
 class TrackingOrderApiController extends Controller
 {
     public function __construct(
         protected PodLocationService $locationService,
     ) {}
 
-    /**
-     * Create a new tracking order (Surat Jalan) from mobile app or API.
-     */
+    #[Endpoint(
+        title: 'Buat surat jalan baru',
+        description: 'Menyimpan SJ dengan no_sj, nama_dealer, alamat, nominal, tanggal, kurir, dan foto. Response `data` adalah TrackingOrderResource.',
+    )]
     public function store(CreateTrackingOrderRequest $request): JsonResponse
     {
         $validated = $request->validated();
 
         $senderName = $validated['nama_pengirim']
-            ?? $request->user()?->nama_lengkap
             ?? $request->user()?->name
             ?? $request->user()?->username;
 
@@ -64,9 +68,15 @@ class TrackingOrderApiController extends Controller
         ], 201);
     }
 
-    /**
-     * Display a listing of tracking orders with search & filtering for couriers.
-     */
+    #[Endpoint(
+        title: 'Daftar surat jalan',
+        description: 'Mengembalikan halaman TrackingOrderResource. Filter: kurir/nama_pengirim, status, date/tanggal_pengiriman, search (no_sj, dealer, alamat).',
+    )]
+    #[QueryParameter('kurir', 'Filter nama pengirim / kurir.', type: 'string')]
+    #[QueryParameter('status', 'PENDING, IN_TRANSIT, DELIVERED, atau RETURNED.', type: 'string')]
+    #[QueryParameter('date', 'Tanggal pengiriman Y-m-d.', type: 'string', format: 'date')]
+    #[QueryParameter('search', 'Cari no_sj, nama_dealer, atau address.', type: 'string')]
+    #[QueryParameter('per_page', 'Jumlah item per halaman, maksimum 100.', type: 'integer')]
     public function index(Request $request): AnonymousResourceCollection
     {
         $query = TrackingOrder::query();
@@ -104,18 +114,19 @@ class TrackingOrderApiController extends Controller
         return TrackingOrderResource::collection($orders);
     }
 
-    /**
-     * Display detail of a single tracking order by ID.
-     */
+    #[Endpoint(
+        title: 'Detail surat jalan by ID',
+        description: 'Mengembalikan satu TrackingOrderResource: identitas SJ, dealer, nominal, tanggal, foto URL, address POD, dan status.',
+    )]
     public function show(TrackingOrder $trackingOrder): TrackingOrderResource
     {
         return new TrackingOrderResource($trackingOrder);
     }
 
-    /**
-     * Look up a tracking order by Surat Jalan (SJ) number.
-     * Ideal for mobile barcode / QR scanner.
-     */
+    #[Endpoint(
+        title: 'Cari surat jalan by nomor SJ',
+        description: 'Lookup barcode/QR. Response `data` TrackingOrderResource, atau 404 jika no_sj tidak ada.',
+    )]
     public function findByNoSj(string $noSj): JsonResponse
     {
         $order = TrackingOrder::where('no_sj', trim($noSj))->first();
@@ -135,17 +146,19 @@ class TrackingOrderApiController extends Controller
         ]);
     }
 
-    /**
-     * Submit Proof of Delivery (POD) from mobile camera & GPS.
-     */
+    #[Endpoint(
+        title: 'Kirim POD by ID',
+        description: 'Menerima foto, nama_penerima, GPS, lalu menandai status DELIVERED. Response `data` TrackingOrderResource terbaru termasuk URL foto.',
+    )]
     public function submitPod(SubmitPodRequest $request, TrackingOrder $trackingOrder): JsonResponse
     {
         return $this->processPodSubmission($request, $trackingOrder);
     }
 
-    /**
-     * Submit Proof of Delivery (POD) directly by Surat Jalan number.
-     */
+    #[Endpoint(
+        title: 'Kirim POD by nomor SJ',
+        description: 'Sama seperti submit POD by ID, tetapi lookup memakai no_sj dari scanner.',
+    )]
     public function submitPodBySj(SubmitPodRequest $request, string $noSj): JsonResponse
     {
         $trackingOrder = TrackingOrder::where('no_sj', trim($noSj))->first();
@@ -267,9 +280,10 @@ class TrackingOrderApiController extends Controller
         ], 200);
     }
 
-    /**
-     * Get distinct list of courier / driver names for mobile app selector.
-     */
+    #[Endpoint(
+        title: 'Daftar nama kurir',
+        description: 'Mengembalikan array string `data` berisi nama_pengirim unik untuk selector di aplikasi.',
+    )]
     public function drivers(): JsonResponse
     {
         $drivers = TrackingOrder::query()
@@ -285,9 +299,12 @@ class TrackingOrderApiController extends Controller
         ]);
     }
 
-    /**
-     * Get courier daily delivery summary statistics.
-     */
+    #[Endpoint(
+        title: 'Ringkasan pengiriman kurir',
+        description: 'Angka `data`: total_assigned, total_delivered, total_pending, total_returned, delivery_rate_percentage. Default: SJ milik user hari ini.',
+    )]
+    #[QueryParameter('kurir', 'Filter nama pengirim. Kosong = user yang login.', type: 'string')]
+    #[QueryParameter('date', 'Tanggal Y-m-d, atau all untuk semua tanggal.', type: 'string')]
     public function courierSummary(Request $request): JsonResponse
     {
         $query = TrackingOrder::query();
@@ -333,9 +350,7 @@ class TrackingOrderApiController extends Controller
             })->orWhere('status', 'DELIVERED');
         })->count();
 
-        // total_pending = yang belum ada POD
         $totalPending = max(0, $totalAssigned - $totalDelivered);
-        $totalInTransit = $totalPending;
         $totalReturned = (clone $query)->where('status', 'RETURNED')->count();
 
         $deliveryRate = $totalAssigned > 0 ? round(($totalDelivered / $totalAssigned) * 100, 1) : 0;
@@ -347,7 +362,6 @@ class TrackingOrderApiController extends Controller
                 'total_assigned' => $totalAssigned,
                 'total_delivered' => $totalDelivered,
                 'total_pending' => $totalPending,
-                'total_in_transit' => $totalInTransit,
                 'total_returned' => $totalReturned,
                 'delivery_rate_percentage' => $deliveryRate,
             ],

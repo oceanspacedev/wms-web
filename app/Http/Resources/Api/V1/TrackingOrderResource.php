@@ -2,11 +2,17 @@
 
 namespace App\Http\Resources\Api\V1;
 
+use App\Models\TrackingOrder;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
+/**
+ * @mixin TrackingOrder
+ *
+ * @property-read TrackingOrder $resource
+ */
 class TrackingOrderResource extends JsonResource
 {
     /**
@@ -17,25 +23,37 @@ class TrackingOrderResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
+            /** ID surat jalan. @var int */
             'id' => $this->id,
+            /** Nomor surat jalan. @var string */
             'no_sj' => $this->no_sj,
+            /** Nama dealer / toko tujuan. @var string */
             'nama_dealer' => $this->nama_dealer,
+            /** Alamat toko tujuan. @var string|null */
             'alamat_dealer' => $this->alamat_dealer,
+            /** Nilai nota. @var float */
             'jumlah_value_nota' => (float) $this->jumlah_value_nota,
-            'jumlah_value_nota_formatted' => 'Rp '.number_format((float) $this->jumlah_value_nota, 0, ',', '.'),
+            /** Tanggal nota (Y-m-d). @var string|null */
             'tanggal_nota' => $this->tanggal_nota?->format('Y-m-d'),
+            /** Tanggal pengiriman (Y-m-d). @var string|null */
             'tanggal_pengiriman' => $this->tanggal_pengiriman?->format('Y-m-d'),
+            /** Nama kurir / pengirim. @var string|null */
             'nama_pengirim' => $this->nama_pengirim,
+            /** Nama penerima di toko. @var string|null */
             'nama_penerima' => $this->nama_penerima,
-            'foto_nota_sj' => $this->foto_nota_sj,
+            /** URL foto nota SJ. @var string|null */
             'foto_nota_sj_url' => $this->resolvePhotoUrl($this->foto_nota_sj, 'tracking-orders/nota'),
-            'foto_penerima' => $this->foto_penerima,
+            /** URL foto penerima. @var string|null */
             'foto_penerima_url' => $this->resolvePhotoUrl($this->foto_penerima, 'tracking-orders/penerima'),
+            /** Alamat POD / GPS. @var string|null */
             'address' => $this->address,
+            /** PENDING, IN_TRANSIT, DELIVERED, atau RETURNED. @var string */
             'status' => $this->status,
-            'is_delivered' => $this->status === 'DELIVERED',
+            /** Catatan kurir. @var string|null */
             'notes' => $this->notes,
+            /** Waktu dibuat (ISO 8601). @var string|null */
             'created_at' => $this->created_at?->toISOString(),
+            /** Waktu diubah (ISO 8601). @var string|null */
             'updated_at' => $this->updated_at?->toISOString(),
         ];
     }

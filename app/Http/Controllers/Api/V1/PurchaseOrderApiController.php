@@ -6,21 +6,25 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\CreatePurchaseOrderRequest;
 use App\Http\Resources\Api\V1\PurchaseOrderResource;
 use App\Models\PurchaseOrder;
+use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
+use Dedoc\Scramble\Attributes\QueryParameter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
+#[Group('Purchase Order', 'Akses data penerimaan barang gudang.', 4)]
 class PurchaseOrderApiController extends Controller
 {
-    /**
-     * Create a new purchase order from mobile app or API.
-     */
+    #[Endpoint(
+        title: 'Buat purchase order',
+        description: 'Menyimpan PO: no_po, supplier, gudang, qty, nominal, bukti serah terima. Response `data` adalah PurchaseOrderResource.',
+    )]
     public function store(CreatePurchaseOrderRequest $request): JsonResponse
     {
         $validated = $request->validated();
 
         $receiverName = $validated['penerima_gudang']
-            ?? $request->user()?->nama_lengkap
             ?? $request->user()?->name
             ?? $request->user()?->username;
 
@@ -57,6 +61,13 @@ class PurchaseOrderApiController extends Controller
         ], 201);
     }
 
+    #[Endpoint(
+        title: 'Daftar purchase order',
+        description: 'Mengembalikan halaman PurchaseOrderResource. Filter search (no_po, SJ supplier, nama_supplier) dan status_penerimaan.',
+    )]
+    #[QueryParameter('search', 'Cari no_po, no_sj_supplier, atau nama_supplier.', type: 'string')]
+    #[QueryParameter('status_penerimaan', 'Lengkap, Kurang, Rusak, atau Belum Datang.', type: 'string')]
+    #[QueryParameter('per_page', 'Jumlah item per halaman, maksimum 100.', type: 'integer')]
     public function index(Request $request): AnonymousResourceCollection
     {
         $query = PurchaseOrder::query();
@@ -81,11 +92,19 @@ class PurchaseOrderApiController extends Controller
         );
     }
 
+    #[Endpoint(
+        title: 'Cari purchase order by nomor PO',
+        description: 'Lookup `no_po`. Response `data` PurchaseOrderResource, atau 404 jika tidak ada.',
+    )]
     public function findByNoPo(string $noPo): JsonResponse
     {
         return $this->findOrder('no_po', $noPo, 'Purchase Order');
     }
 
+    #[Endpoint(
+        title: 'Cari purchase order by SJ supplier',
+        description: 'Lookup `no_sj_supplier`. Response `data` PurchaseOrderResource, atau 404 jika tidak ada.',
+    )]
     public function findBySupplierSj(string $noSj): JsonResponse
     {
         return $this->findOrder('no_sj_supplier', $noSj, 'Surat Jalan supplier');

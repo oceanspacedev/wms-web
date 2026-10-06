@@ -12,6 +12,8 @@ use App\Models\User;
 use App\Models\WhatsappOtp;
 use App\Services\WhatsAppOtpService;
 use App\Support\WhatsAppNumber;
+use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -19,36 +21,21 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
+#[Group('Profil', 'Ubah data akun, foto, nomor WhatsApp, atau hapus akun.', 2)]
 class UserProfileApiController extends Controller
 {
-    /**
-     * Get current authenticated user profile.
-     */
-    public function show(Request $request): JsonResponse
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $user->load('roles');
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Profil berhasil dimuat.',
-            'data' => new AuthUserResource($user),
-        ]);
-    }
-
-    /**
-     * Update user profile (name, username, password).
-     */
+    #[Endpoint(
+        method: 'put',
+        title: 'Perbarui nama, username, atau password',
+        description: 'Mengubah field yang dikirim: `name`, `username`, `password`. Response `data` memakai nama kolom tabel users.',
+    )]
     public function update(UpdateUserProfileRequest $request): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
         $validated = $request->validated();
 
-        if (filled($validated['nama_lengkap'] ?? null)) {
-            $user->name = trim((string) $validated['nama_lengkap']);
-        } elseif (filled($validated['name'] ?? null)) {
+        if (filled($validated['name'] ?? null)) {
             $user->name = trim((string) $validated['name']);
         }
 
@@ -71,9 +58,10 @@ class UserProfileApiController extends Controller
         ]);
     }
 
-    /**
-     * Update user profile photo.
-     */
+    #[Endpoint(
+        title: 'Unggah foto profil',
+        description: 'Menerima file `profile_photo`. Menyimpan ke kolom `avatar_url` lalu mengembalikan profil dengan URL foto baru.',
+    )]
     public function updatePhoto(UpdateUserProfilePhotoRequest $request): JsonResponse
     {
         /** @var User $user */
@@ -108,9 +96,10 @@ class UserProfileApiController extends Controller
         ]);
     }
 
-    /**
-     * Request OTP to update WhatsApp number.
-     */
+    #[Endpoint(
+        title: 'Minta OTP ganti nomor WhatsApp',
+        description: 'Mengirim OTP ke nomor baru. Response `data`: `expires_in` dan `whatsapp_number` ter-mask. Nomor belum disimpan sampai verifikasi.',
+    )]
     public function requestWhatsAppOtp(RequestWhatsAppOtpRequest $request, WhatsAppOtpService $otpService): JsonResponse
     {
         /** @var User $user */
@@ -176,9 +165,10 @@ class UserProfileApiController extends Controller
         ]);
     }
 
-    /**
-     * Verify OTP and update WhatsApp number.
-     */
+    #[Endpoint(
+        title: 'Verifikasi OTP dan simpan nomor WhatsApp',
+        description: 'Menyimpan `whatsapp_number` ke akun setelah OTP valid. Response `data` adalah profil lengkap termasuk nomor baru.',
+    )]
     public function verifyWhatsAppOtp(VerifyWhatsAppOtpRequest $request, WhatsAppOtpService $otpService): JsonResponse
     {
         /** @var User $user */
@@ -242,9 +232,10 @@ class UserProfileApiController extends Controller
         ]);
     }
 
-    /**
-     * Delete user account.
-     */
+    #[Endpoint(
+        title: 'Hapus akun',
+        description: 'Menghapus akun yang sedang masuk, mencabut semua token, dan menghapus foto profil. Response `data` bernilai null.',
+    )]
     public function destroy(Request $request): JsonResponse
     {
         /** @var User $user */

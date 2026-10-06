@@ -12,6 +12,8 @@ use App\Models\User;
 use App\Models\WhatsappOtp;
 use App\Services\WhatsAppOtpService;
 use App\Support\WhatsAppNumber;
+use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
 use Filament\Facades\Filament;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,10 +21,18 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 
+#[Group('Auth', 'Login, sesi, dan data profil pengguna yang sedang masuk.', 1)]
 class AuthController extends Controller
 {
     use InteractsWithWhatsAppLogin;
 
+    /**
+     * @unauthenticated
+     */
+    #[Endpoint(
+        title: 'Login dengan username atau email',
+        description: 'Menerima `login` (username atau email) dan `password`. Mengembalikan `access_token` Bearer serta data user sesuai kolom tabel: id, username, name, email, avatar_url, whatsapp_number, plus role dan roles.',
+    )]
     public function login(PasswordLoginRequest $request): JsonResponse
     {
         $login = trim($request->string('login')->toString());
@@ -43,6 +53,13 @@ class AuthController extends Controller
         return $this->tokenResponse($user, 'Login berhasil.');
     }
 
+    /**
+     * @unauthenticated
+     */
+    #[Endpoint(
+        title: 'Minta OTP login WhatsApp',
+        description: 'Mengirim OTP ke nomor WhatsApp yang sudah terdaftar. Response `data` berisi `expires_in` (detik) dan `whatsapp_number` yang sudah di-mask.',
+    )]
     public function requestWhatsAppOtp(WhatsAppLoginRequest $request, WhatsAppOtpService $otpService): JsonResponse
     {
         $number = $this->normalizeWhatsAppNumber($request->input('whatsapp_number'));
@@ -85,6 +102,13 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * @unauthenticated
+     */
+    #[Endpoint(
+        title: 'Verifikasi OTP login WhatsApp',
+        description: 'Menukar nomor WhatsApp dan OTP menjadi Bearer token plus data user yang sama seperti login password.',
+    )]
     public function verifyWhatsAppOtp(VerifyWhatsAppLoginRequest $request, WhatsAppOtpService $otpService): JsonResponse
     {
         $number = $this->normalizeWhatsAppNumber($request->input('whatsapp_number'));
@@ -112,6 +136,10 @@ class AuthController extends Controller
         return $this->tokenResponse($user, 'Login berhasil.');
     }
 
+    #[Endpoint(
+        title: 'Ambil profil pengguna yang sedang masuk',
+        description: 'Membaca data akun dari token Bearer. Field `data` mengikuti kolom users: id, username, name, email, avatar_url, whatsapp_number, plus role (id + name) dan roles.',
+    )]
     public function me(Request $request): JsonResponse
     {
         $request->user()->load('roles');
@@ -123,6 +151,10 @@ class AuthController extends Controller
         ]);
     }
 
+    #[Endpoint(
+        title: 'Logout dan cabut token',
+        description: 'Menghapus token Sanctum yang sedang dipakai. Tidak mengembalikan data akun.',
+    )]
     public function logout(Request $request): JsonResponse
     {
         $token = $request->user()?->currentAccessToken();

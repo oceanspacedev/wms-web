@@ -48,9 +48,17 @@ class PurchaseOrderApiTest extends TestCase
                         'total_nominal',
                         'keterangan_barang',
                         'status_penerimaan',
+                        'catatan_gudang',
+                        'bukti_serah_terima_url',
                     ],
                 ],
             ]);
+
+        $first = $response->json('data.0');
+        $this->assertIsArray($first);
+        $this->assertArrayNotHasKey('bukti_serah_terima', $first);
+        $this->assertArrayNotHasKey('status_verifikasi_finance', $first);
+        $this->assertArrayNotHasKey('catatan_finance', $first);
 
         $this->assertTrue(collect($response->json('data'))->every(fn ($item) => $item['status_penerimaan'] === 'Lengkap'));
     }

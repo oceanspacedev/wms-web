@@ -21,7 +21,6 @@ class UpdateUserProfileRequest extends FormRequest
         $userId = $this->user()?->id;
 
         return [
-            'nama_lengkap' => ['nullable', 'string', 'max:255'],
             'name' => ['nullable', 'string', 'max:255'],
             'username' => [
                 'nullable',

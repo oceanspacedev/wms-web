@@ -16,7 +16,8 @@ class ScrambleDocsTest extends TestCase
     {
         $response = $this->get('/docs/api');
 
-        $response->assertStatus(200);
+        $response->assertStatus(200)
+            ->assertDontSee('JR001');
     }
 
     public function test_api_documentation_json_is_accessible(): void
@@ -48,5 +49,20 @@ class ScrambleDocsTest extends TestCase
         $this->actingAs($deniedUser)
             ->get('/docs/api')
             ->assertForbidden();
+    }
+
+    public function test_openapi_describes_canonical_data_access_without_alias_duplicates(): void
+    {
+        $response = $this->getJson('/docs/api.json');
+
+        $response->assertOk();
+        $response->assertJsonMissingPath('paths./user');
+        $response->assertJsonMissingPath('paths./user/photo');
+        $response->assertJsonPath('paths./login.post.summary', 'Login dengan username atau email');
+        $response->assertJsonPath('paths./me.get.summary', 'Ambil profil pengguna yang sedang masuk');
+        $this->assertNotEmpty($response->json('paths./me.get.description'));
+        $this->assertNotEmpty($response->json('components.schemas.AuthUserResource.properties.name.description'));
+        $this->assertNotEmpty($response->json('components.schemas.TrackingOrderResource.properties.no_sj.description'));
+        $this->assertNotEmpty($response->json('components.schemas.PurchaseOrderResource.properties.no_po.description'));
     }
 }

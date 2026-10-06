@@ -36,13 +36,14 @@ class WmsProfileApiTest extends TestCase
             ->assertJsonPath('message', 'Profil berhasil dimuat.')
             ->assertJsonPath('data.id', $user->id)
             ->assertJsonPath('data.username', 'kurir01')
-            ->assertJsonPath('data.nama_lengkap', 'Budi Santoso')
+            ->assertJsonPath('data.name', 'Budi Santoso')
             ->assertJsonPath('data.whatsapp_number', '6281234567890')
             ->assertJsonPath('data.role.id', $role->id)
             ->assertJsonPath('data.role.name', 'kurir')
             ->assertJsonPath('data.roles.0', 'kurir');
 
-        $this->assertStringContainsString('avatars/test-avatar.jpg', (string) $response->json('data.profile_photo_url'));
+        $this->assertStringContainsString('avatars/test-avatar.jpg', (string) $response->json('data.avatar_url'));
+        $response->assertJsonMissingPaths(['data.nama_lengkap', 'data.profile_photo_url']);
 
         // Also test GET /api/user alias
         $aliasResponse = $this->actingAs($user, 'sanctum')->getJson('/api/user');
@@ -147,7 +148,7 @@ class WmsProfileApiTest extends TestCase
         ]);
 
         $response = $this->actingAs($user, 'sanctum')->putJson('/api/user', [
-            'nama_lengkap' => 'Nama Baru',
+            'name' => 'Nama Baru',
             'username' => 'username_baru',
             'password' => 'newpassword123',
         ]);
@@ -155,7 +156,7 @@ class WmsProfileApiTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('success', true)
             ->assertJsonPath('message', 'Profil berhasil diperbarui.')
-            ->assertJsonPath('data.nama_lengkap', 'Nama Baru')
+            ->assertJsonPath('data.name', 'Nama Baru')
             ->assertJsonPath('data.username', 'username_baru');
 
         $user->refresh();

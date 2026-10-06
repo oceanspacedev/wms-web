@@ -36,23 +36,26 @@ class TrackingOrderApiTest extends TestCase
                         'nama_dealer',
                         'alamat_dealer',
                         'jumlah_value_nota',
-                        'jumlah_value_nota_formatted',
                         'tanggal_nota',
                         'tanggal_pengiriman',
                         'nama_pengirim',
                         'nama_penerima',
-                        'foto_nota_sj',
                         'foto_nota_sj_url',
-                        'foto_penerima',
                         'foto_penerima_url',
                         'address',
                         'status',
-                        'is_delivered',
                     ],
                 ],
             ]);
 
         $this->assertTrue(collect($response->json('data'))->every(fn ($item) => str_contains($item['nama_pengirim'], 'Heidy')));
+
+        $first = $response->json('data.0');
+        $this->assertIsArray($first);
+        $this->assertArrayNotHasKey('jumlah_value_nota_formatted', $first);
+        $this->assertArrayNotHasKey('foto_nota_sj', $first);
+        $this->assertArrayNotHasKey('foto_penerima', $first);
+        $this->assertArrayNotHasKey('is_delivered', $first);
     }
 
     public function test_can_find_tracking_order_by_surat_jalan_barcode(): void
@@ -107,7 +110,7 @@ class TrackingOrderApiTest extends TestCase
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.nama_penerima', 'Ibu Siti Khodijah (Kepala Toko)')
             ->assertJsonPath('data.status', 'DELIVERED')
-            ->assertJsonPath('data.is_delivered', true);
+            ->assertJsonMissingPath('data.is_delivered');
 
         $order->refresh();
         $this->assertSame('DELIVERED', $order->status);
@@ -162,12 +165,12 @@ class TrackingOrderApiTest extends TestCase
                 'data' => [
                     'total_assigned',
                     'total_delivered',
-                    'total_in_transit',
                     'total_pending',
                     'total_returned',
                     'delivery_rate_percentage',
                 ],
-            ]);
+            ])
+            ->assertJsonMissingPath('data.total_in_transit');
     }
 
     public function test_auto_resolves_location_and_stamps_photo_when_courier_only_sends_coordinates(): void
