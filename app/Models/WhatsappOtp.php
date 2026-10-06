@@ -9,6 +9,8 @@ class WhatsappOtp extends Model
 {
     public const PURPOSE_LOGIN = 'login';
 
+    public const PURPOSE_UPDATE_WHATSAPP = 'update_whatsapp';
+
     /**
      * @var list<string>
      */

@@ -295,27 +295,59 @@ class TrackingOrderApiController extends Controller
         if ($request->filled('kurir') || $request->filled('nama_pengirim')) {
             $kurir = $request->input('kurir', $request->input('nama_pengirim'));
             $query->where('nama_pengirim', 'LIKE', "%{$kurir}%");
+        } elseif ($user = $request->user()) {
+            $identifiers = array_values(array_filter([$user->name, $user->username]));
+            if (! empty($identifiers)) {
+                $query->where(function ($q) use ($identifiers): void {
+                    foreach ($identifiers as $identifier) {
+                        $q->orWhere('nama_pengirim', 'LIKE', "%{$identifier}%");
+                    }
+                });
+            }
         }
 
         if ($request->filled('date')) {
-            $query->whereDate('tanggal_pengiriman', $request->input('date'));
+            if ($request->input('date') !== 'all') {
+                $query->whereDate('tanggal_pengiriman', $request->input('date'));
+            }
+        } elseif (! $request->filled('kurir') && ! $request->filled('nama_pengirim')) {
+            // Tanpa query dari Profile: hitung SJ milik kurir hari ini
+            $today = now()->toDateString();
+            $query->where(function ($q) use ($today): void {
+                $q->whereDate('tanggal_pengiriman', $today)
+                    ->orWhere(function ($sub) use ($today): void {
+                        $sub->whereNull('tanggal_pengiriman')
+                            ->whereDate('created_at', $today);
+                    });
+            });
         }
 
         $totalAssigned = (clone $query)->count();
-        $totalDelivered = (clone $query)->where('status', 'DELIVERED')->count();
-        $totalInTransit = (clone $query)->where('status', 'IN_TRANSIT')->count();
-        $totalPending = (clone $query)->where('status', 'PENDING')->count();
+
+        // Status SJ sudah dihapus di app, jadi hitung yang sudah ada nama/foto penerima atau status DELIVERED
+        $totalDelivered = (clone $query)->where(function ($q): void {
+            $q->where(function ($sub): void {
+                $sub->whereNotNull('foto_penerima')->where('foto_penerima', '!=', '');
+            })->orWhere(function ($sub): void {
+                $sub->whereNotNull('nama_penerima')->where('nama_penerima', '!=', '');
+            })->orWhere('status', 'DELIVERED');
+        })->count();
+
+        // total_pending = yang belum ada POD
+        $totalPending = max(0, $totalAssigned - $totalDelivered);
+        $totalInTransit = $totalPending;
         $totalReturned = (clone $query)->where('status', 'RETURNED')->count();
 
         $deliveryRate = $totalAssigned > 0 ? round(($totalDelivered / $totalAssigned) * 100, 1) : 0;
 
         return response()->json([
             'success' => true,
+            'message' => 'Ringkasan kurir berhasil dimuat.',
             'data' => [
                 'total_assigned' => $totalAssigned,
                 'total_delivered' => $totalDelivered,
-                'total_in_transit' => $totalInTransit,
                 'total_pending' => $totalPending,
+                'total_in_transit' => $totalInTransit,
                 'total_returned' => $totalReturned,
                 'delivery_rate_percentage' => $deliveryRate,
             ],

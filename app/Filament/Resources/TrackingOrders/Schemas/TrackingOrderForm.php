@@ -4,7 +4,6 @@ namespace App\Filament\Resources\TrackingOrders\Schemas;
 
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Grid;
@@ -19,6 +18,7 @@ class TrackingOrderForm
             ->components([
                 Section::make('Informasi Surat Jalan & Dealer')
                     ->description('Detail identitas dealer dan nomor surat jalan')
+                    ->extraAttributes(['class' => 'h-full'])
                     ->schema([
                         Grid::make(2)
                             ->schema([
@@ -34,14 +34,14 @@ class TrackingOrderForm
                                     ->placeholder('Contoh: 2401304519'),
                             ]),
 
-                        Grid::make(3)
-                            ->schema([
-                                TextInput::make('jumlah_value_nota')
-                                    ->label('Jumlah Value Nota')
-                                    ->numeric()
-                                    ->prefix('Rp')
-                                    ->default(0),
+                        Textarea::make('alamat_dealer')
+                            ->label('Alamat Dealer')
+                            ->rows(3)
+                            ->columnSpanFull()
+                            ->placeholder('Alamat lengkap dealer tujuan'),
 
+                        Grid::make(2)
+                            ->schema([
                                 DatePicker::make('tanggal_nota')
                                     ->label('Tanggal Nota')
                                     ->native(false),
@@ -51,15 +51,17 @@ class TrackingOrderForm
                                     ->native(false),
                             ]),
 
-                        Textarea::make('alamat_dealer')
-                            ->label('Alamat Dealer')
-                            ->rows(3)
-                            ->columnSpanFull()
-                            ->placeholder('Alamat lengkap dealer tujuan'),
+                        TextInput::make('jumlah_value_nota')
+                            ->label('Jumlah Value Nota')
+                            ->numeric()
+                            ->prefix('Rp')
+                            ->default(0)
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Bukti Pengiriman & Penerimaan')
                     ->description('Dokumentasi serah terima barang, foto fisik, dan alamat')
+                    ->extraAttributes(['class' => 'h-full'])
                     ->schema([
                         Grid::make(2)
                             ->schema([
@@ -73,6 +75,12 @@ class TrackingOrderForm
                                     ->maxLength(255)
                                     ->placeholder('Contoh: Imas / Rini / Syifa'),
                             ]),
+
+                        Textarea::make('address')
+                            ->label('Address / Alamat Serah Terima')
+                            ->rows(3)
+                            ->columnSpanFull()
+                            ->placeholder('Contoh: Jalan Ibu Inggit Garnasih, Ciateul, Bandung City, West Java, Indonesia'),
 
                         Grid::make(2)
                             ->schema([
@@ -91,38 +99,6 @@ class TrackingOrderForm
                                     ->visibility('public')
                                     ->openable()
                                     ->downloadable(),
-                            ]),
-
-                        Textarea::make('address')
-                            ->label('Address / Alamat Serah Terima')
-                            ->rows(3)
-                            ->columnSpanFull()
-                            ->placeholder('Contoh: Jalan Ibu Inggit Garnasih, Ciateul, Bandung City, West Java, Indonesia'),
-                    ]),
-
-                Section::make('Status & Catatan')
-                    ->description('Status pengiriman dan keterangan operasional')
-                    ->columnSpanFull()
-                    ->schema([
-                        Grid::make(3)
-                            ->schema([
-                                Select::make('status')
-                                    ->label('Status Pengiriman')
-                                    ->options([
-                                        'DELIVERED' => 'Terkirim (Delivered)',
-                                        'IN_TRANSIT' => 'Dalam Perjalanan (In Transit)',
-                                        'PENDING' => 'Menunggu Kirim (Pending)',
-                                        'RETURNED' => 'Retur / Dibatalkan (Returned)',
-                                    ])
-                                    ->default('DELIVERED')
-                                    ->required()
-                                    ->columnSpan(1),
-
-                                Textarea::make('notes')
-                                    ->label('Catatan Tambahan')
-                                    ->rows(2)
-                                    ->placeholder('Keterangan status atau kendala jika ada')
-                                    ->columnSpan(2),
                             ]),
                     ]),
             ]);

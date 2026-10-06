@@ -4,7 +4,6 @@ namespace App\Filament\Resources\CsaImports\Schemas;
 
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\FileUpload;
-use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
 class CsaImportForm
@@ -12,28 +11,25 @@ class CsaImportForm
     public static function configure(Schema $schema): Schema
     {
         return $schema
+            ->columns(1)
             ->components([
-                Section::make('Upload Laporan Penjualan ERP CSA')
-                    ->description('Pilih file export laporan penjualan CSA (.xlsx) untuk diekstrak dan diagregasikan per Surat Jalan.')
-                    ->schema([
-                        FileUpload::make('excel_file')
-                            ->label('File Excel (.xlsx)')
-                            ->disk('local')
-                            ->directory('csa_imports')
-                            ->acceptedFileTypes([
-                                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                'application/octet-stream',
-                                'application/zip',
-                            ])
-                            ->required()
-                            ->maxSize(102400) // 100MB
-                            ->helperText('Contoh file: LAP PENJUALAN MSI SEPTEMBER 2026.xlsx'),
+                FileUpload::make('excel_file')
+                    ->label('File Excel (.xlsx)')
+                    ->disk('local')
+                    ->directory('csa_imports')
+                    ->acceptedFileTypes([
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'application/octet-stream',
+                        'application/zip',
+                    ])
+                    ->required()
+                    ->maxSize(102400) // 100MB
+                    ->helperText('Contoh file: LAP PENJUALAN MSI SEPTEMBER 2026.xlsx'),
 
-                        Checkbox::make('auto_sync')
-                            ->label('Otomatis langsung sinkronkan ke Google Spreadsheet setelah parsing selesai')
-                            ->default(false)
-                            ->helperText('Jika dicentang, seluruh data yang berhasil diagregasikan akan langsung dikirim ke masing-masing sheet cabang.'),
-                    ]),
+                Checkbox::make('auto_sync')
+                    ->label('Otomatis langsung sinkronkan ke Google Spreadsheet setelah parsing selesai')
+                    ->default(false)
+                    ->helperText('Jika dicentang, seluruh data yang berhasil diagregasikan akan langsung dikirim ke masing-masing sheet cabang.'),
             ]);
     }
 }

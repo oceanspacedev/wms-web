@@ -98,6 +98,11 @@ class User extends Authenticatable implements FilamentUser, HasAvatar
             return $this->avatar_url;
         }
 
-        return Storage::disk('public')->url($this->avatar_url);
+        $path = ltrim($this->avatar_url, '/');
+        if (str_starts_with($path, 'storage/')) {
+            return url($path);
+        }
+
+        return Storage::disk('public')->url($path);
     }
 }

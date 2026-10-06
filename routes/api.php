@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\PurchaseOrderApiController;
 use App\Http\Controllers\Api\V1\TrackingOrderApiController;
+use App\Http\Controllers\Api\V1\UserProfileApiController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('throttle:api-login')->group(function (): void {
@@ -12,8 +13,22 @@ Route::middleware('throttle:api-login')->group(function (): void {
 });
 
 Route::middleware('auth:sanctum')->group(function (): void {
+    // WMS Profile: Wajib
     Route::get('/me', [AuthController::class, 'me']);
+    Route::get('/user', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
+
+    // WMS Profile: Opsional (Edit Profil, Foto, WA, Hapus Akun)
+    Route::match(['put', 'patch'], '/user', [UserProfileApiController::class, 'update']);
+    Route::match(['put', 'patch'], '/me', [UserProfileApiController::class, 'update']);
+    Route::post('/user/photo', [UserProfileApiController::class, 'updatePhoto']);
+    Route::post('/me/photo', [UserProfileApiController::class, 'updatePhoto']);
+    Route::post('/user/whatsapp/request-otp', [UserProfileApiController::class, 'requestWhatsAppOtp']);
+    Route::post('/me/whatsapp/request-otp', [UserProfileApiController::class, 'requestWhatsAppOtp']);
+    Route::post('/user/whatsapp/verify-otp', [UserProfileApiController::class, 'verifyWhatsAppOtp']);
+    Route::post('/me/whatsapp/verify-otp', [UserProfileApiController::class, 'verifyWhatsAppOtp']);
+    Route::delete('/user', [UserProfileApiController::class, 'destroy']);
+    Route::delete('/me', [UserProfileApiController::class, 'destroy']);
 
     Route::get('/courier/drivers', [TrackingOrderApiController::class, 'drivers']);
     Route::get('/courier/summary', [TrackingOrderApiController::class, 'courierSummary']);

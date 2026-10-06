@@ -4,7 +4,6 @@ namespace App\Filament\Resources\PurchaseOrders\Schemas;
 
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Grid;
@@ -19,6 +18,7 @@ class PurchaseOrderForm
             ->components([
                 Section::make('Informasi Purchase Order & Supplier')
                     ->description('Detail nomor PO, supplier, gudang tujuan, dan nilai pemesanan')
+                    ->extraAttributes(['class' => 'h-full'])
                     ->schema([
                         Grid::make(2)
                             ->schema([
@@ -75,6 +75,7 @@ class PurchaseOrderForm
 
                 Section::make('Penerimaan Fisik & Logistik Gudang')
                     ->description('Pemeriksaan fisik barang datang, ekspedisi pengantar, dan dokumen serah terima')
+                    ->extraAttributes(['class' => 'h-full'])
                     ->schema([
                         Grid::make(2)
                             ->schema([
@@ -130,49 +131,6 @@ class PurchaseOrderForm
                             ->openable()
                             ->downloadable()
                             ->columnSpanFull(),
-                    ]),
-
-                Section::make('Verifikasi Finance & Akuntansi')
-                    ->description('Status pencocokan dokumen fisik dengan tagihan keuangan')
-                    ->columnSpanFull()
-                    ->schema([
-                        Grid::make(3)
-                            ->schema([
-                                Select::make('status_penerimaan')
-                                    ->label('Status Penerimaan Fisik')
-                                    ->options([
-                                        'Lengkap' => 'Lengkap (Sesuai PO)',
-                                        'Kurang' => 'Kurang / Sebagian',
-                                        'Rusak' => 'Ada Barang Rusak / Cacat',
-                                        'Belum Datang' => 'Belum Datang',
-                                    ])
-                                    ->default('Lengkap')
-                                    ->required()
-                                    ->columnSpan(1),
-
-                                Select::make('status_verifikasi_finance')
-                                    ->label('Status Verifikasi Finance')
-                                    ->options([
-                                        'Menunggu Pemeriksaan' => 'Menunggu Pemeriksaan',
-                                        'Disetujui' => 'Disetujui (Approved)',
-                                        'Ditolak' => 'Ditolak / Selisih',
-                                    ])
-                                    ->default('Menunggu Pemeriksaan')
-                                    ->required()
-                                    ->columnSpan(1),
-
-                                TextInput::make('verified_by')
-                                    ->label('Diverifikasi Oleh')
-                                    ->maxLength(255)
-                                    ->placeholder('Nama staf finance')
-                                    ->columnSpan(1),
-                            ]),
-
-                        Textarea::make('catatan_finance')
-                            ->label('Catatan Finance')
-                            ->rows(2)
-                            ->columnSpanFull()
-                            ->placeholder('Catatan audit dokumen, faktur, atau bukti selisih jika ada'),
                     ]),
             ]);
     }

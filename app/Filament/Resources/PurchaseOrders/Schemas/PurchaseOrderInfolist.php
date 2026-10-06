@@ -113,43 +113,6 @@ class PurchaseOrderInfolist
                             ->placeholder('Tidak ada lampiran')
                             ->columnSpanFull(),
                     ]),
-
-                Section::make('Verifikasi Finance & Akuntansi')
-                    ->description('Status pencocokan dokumen fisik dengan tagihan keuangan')
-                    ->columnSpanFull()
-                    ->schema([
-                        Grid::make(3)
-                            ->schema([
-                                TextEntry::make('status_penerimaan')
-                                    ->label('Status Penerimaan Fisik')
-                                    ->badge()
-                                    ->color(fn (?string $state): string => match ($state) {
-                                        'Lengkap' => 'success',
-                                        'Kurang' => 'warning',
-                                        'Rusak' => 'danger',
-                                        default => 'gray',
-                                    }),
-
-                                TextEntry::make('status_verifikasi_finance')
-                                    ->label('Status Verifikasi Finance')
-                                    ->badge()
-                                    ->color(fn (?string $state): string => match ($state) {
-                                        'Disetujui', 'Selesai' => 'success',
-                                        'Menunggu Pemeriksaan' => 'warning',
-                                        'Ditolak' => 'danger',
-                                        default => 'gray',
-                                    }),
-
-                                TextEntry::make('verified_by')
-                                    ->label('Diverifikasi Oleh')
-                                    ->placeholder('-'),
-                            ]),
-
-                        TextEntry::make('catatan_finance')
-                            ->label('Catatan Finance')
-                            ->placeholder('-')
-                            ->columnSpanFull(),
-                    ]),
             ]);
     }
 }

@@ -12,13 +12,22 @@ class AuthUserResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $primaryRole = $this->roles?->first();
+
         return [
             'id' => $this->id,
-            'name' => $this->name,
             'username' => $this->username,
+            'nama_lengkap' => $this->name,
+            'name' => $this->name,
             'email' => $this->email,
+            'profile_photo_url' => $this->getFilamentAvatarUrl(),
+            'avatar_url' => $this->avatar_url,
             'whatsapp_number' => $this->whatsapp_number,
-            'roles' => $this->getRoleNames()->values(),
+            'role' => $primaryRole ? [
+                'id' => $primaryRole->id,
+                'name' => $primaryRole->name,
+            ] : null,
+            'roles' => $this->getRoleNames()->values()->all(),
         ];
     }
 }

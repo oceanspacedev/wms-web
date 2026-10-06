@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\CsaImports;
 
-use App\Filament\Resources\CsaImports\Pages\CreateCsaImport;
 use App\Filament\Resources\CsaImports\Pages\EditCsaImport;
 use App\Filament\Resources\CsaImports\Pages\ListCsaImports;
 use App\Filament\Resources\CsaImports\Pages\ViewCsaImport;
@@ -56,7 +55,6 @@ class CsaImportResource extends Resource
     {
         return [
             'index' => ListCsaImports::route('/'),
-            'create' => CreateCsaImport::route('/create'),
             'view' => ViewCsaImport::route('/{record}'),
             'edit' => EditCsaImport::route('/{record}/edit'),
         ];
