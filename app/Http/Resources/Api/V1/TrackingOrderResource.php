@@ -45,8 +45,12 @@ class TrackingOrderResource extends JsonResource
             'foto_nota_sj_url' => $this->resolvePhotoUrl($this->foto_nota_sj, 'tracking-orders/nota'),
             /** URL foto penerima. @var string|null */
             'foto_penerima_url' => $this->resolvePhotoUrl($this->foto_penerima, 'tracking-orders/penerima'),
-            /** Alamat POD / GPS. @var string|null */
+            /** Alamat serah terima / POD. @var string|null */
             'address' => $this->address,
+            /** Koordinat latitude serah terima. @var float|null */
+            'latitude' => $this->latitude !== null ? (float) $this->latitude : null,
+            /** Koordinat longitude serah terima. @var float|null */
+            'longitude' => $this->longitude !== null ? (float) $this->longitude : null,
             /** PENDING, IN_TRANSIT, DELIVERED, atau RETURNED. @var string */
             'status' => $this->status,
             /** Catatan kurir. @var string|null */

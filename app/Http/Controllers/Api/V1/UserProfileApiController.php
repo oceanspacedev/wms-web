@@ -60,13 +60,13 @@ class UserProfileApiController extends Controller
 
     #[Endpoint(
         title: 'Unggah foto profil',
-        description: 'Menerima file `profile_photo`. Menyimpan ke kolom `avatar_url` lalu mengembalikan profil dengan URL foto baru.',
+        description: 'Menerima file `avatar_url`. Menyimpan ke kolom `avatar_url` lalu mengembalikan profil dengan URL foto baru.',
     )]
     public function updatePhoto(UpdateUserProfilePhotoRequest $request): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
-        $file = $request->file('profile_photo') ?? $request->file('photo') ?? $request->file('avatar');
+        $file = $request->file('avatar_url');
 
         if (! $file) {
             return response()->json([
@@ -74,7 +74,7 @@ class UserProfileApiController extends Controller
                 'message' => 'File foto profil tidak ditemukan.',
                 'data' => null,
                 'errors' => [
-                    'profile_photo' => ['File foto profil tidak ditemukan.'],
+                    'avatar_url' => ['File foto profil tidak ditemukan.'],
                 ],
             ], 422);
         }

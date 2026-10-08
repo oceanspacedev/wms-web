@@ -43,6 +43,8 @@ class TrackingOrderApiTest extends TestCase
                         'foto_nota_sj_url',
                         'foto_penerima_url',
                         'address',
+                        'latitude',
+                        'longitude',
                         'status',
                     ],
                 ],
@@ -109,13 +111,16 @@ class TrackingOrderApiTest extends TestCase
         $response->assertStatus(200)
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.nama_penerima', 'Ibu Siti Khodijah (Kepala Toko)')
+            ->assertJsonPath('data.latitude', -6.917464)
+            ->assertJsonPath('data.longitude', 107.619123)
             ->assertJsonPath('data.status', 'DELIVERED')
             ->assertJsonMissingPath('data.is_delivered');
 
         $order->refresh();
         $this->assertSame('DELIVERED', $order->status);
         $this->assertSame('Ibu Siti Khodijah (Kepala Toko)', $order->nama_penerima);
-        $this->assertStringContainsString('GPS: [-6.917464, 107.619123]', $order->address);
+        $this->assertEquals(-6.917464, $order->latitude);
+        $this->assertEquals(107.619123, $order->longitude);
         $this->assertNotNull($order->foto_nota_sj);
         $this->assertNotNull($order->foto_penerima);
 
@@ -200,9 +205,9 @@ class TrackingOrderApiTest extends TestCase
             ->assertJsonPath('data.status', 'DELIVERED');
 
         $order->refresh();
-        // The address column was automatically populated with dealer address and GPS coordinates!
         $this->assertNotEmpty($order->address);
-        $this->assertStringContainsString('GPS: [-6.90389, 107.61861]', $order->address);
+        $this->assertEquals(-6.903890, $order->latitude);
+        $this->assertEquals(107.618610, $order->longitude);
 
         // Photo was saved with watermark to public storage
         $this->assertNotNull($order->foto_penerima);
@@ -224,6 +229,8 @@ class TrackingOrderApiTest extends TestCase
             'tanggal_nota' => '2026-10-02',
             'tanggal_pengiriman' => '2026-10-02',
             'nama_pengirim' => 'Supir Budi',
+            'latitude' => -6.917464,
+            'longitude' => 107.619123,
             'status' => 'IN_TRANSIT',
             'notes' => 'Pengiriman koli 3 box handphone',
             'foto_nota_sj' => $notaSjImage,
@@ -235,17 +242,36 @@ class TrackingOrderApiTest extends TestCase
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.no_sj', 'SJ-MOBILE-NEW-999')
             ->assertJsonPath('data.nama_dealer', 'Toko Abadi Jaya Selular')
+            ->assertJsonPath('data.latitude', -6.917464)
+            ->assertJsonPath('data.longitude', 107.619123)
             ->assertJsonPath('data.status', 'IN_TRANSIT');
 
         $this->assertDatabaseHas('tracking_orders', [
             'no_sj' => 'SJ-MOBILE-NEW-999',
             'nama_dealer' => 'Toko Abadi Jaya Selular',
+            'latitude' => -6.917464,
+            'longitude' => 107.619123,
             'status' => 'IN_TRANSIT',
         ]);
 
         $order = TrackingOrder::where('no_sj', 'SJ-MOBILE-NEW-999')->firstOrFail();
         $this->assertNotNull($order->foto_nota_sj);
         Storage::disk('public')->assertExists($order->foto_nota_sj);
+    }
+
+    public function test_user_cannot_create_tracking_order_with_invalid_coordinates(): void
+    {
+        $this->actAsCourier();
+
+        $response = $this->postJson('/api/tracking-orders', [
+            'no_sj' => 'SJ-INVALID-COORDS',
+            'nama_dealer' => 'Toko Test',
+            'latitude' => 120, // out of range (-90 to 90)
+            'longitude' => 200, // out of range (-180 to 180)
+        ]);
+
+        $response->assertUnprocessable()
+            ->assertJsonValidationErrors(['latitude', 'longitude']);
     }
 
     public function test_user_cannot_create_tracking_order_with_duplicate_no_sj(): void

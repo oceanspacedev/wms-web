@@ -189,19 +189,30 @@ class WmsProfileApiTest extends TestCase
 
         $photo = UploadedFile::fake()->image('profile.png', 400, 400);
 
-        $response = $this->actingAs($user, 'sanctum')->postJson('/api/user/photo', [
-            'profile_photo' => $photo,
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/me/photo', [
+            'avatar_url' => $photo,
         ]);
 
         $response->assertOk()
             ->assertJsonPath('success', true)
-            ->assertJsonPath('message', 'Foto profil berhasil diperbarui.');
+            ->assertJsonPath('message', 'Foto profil berhasil diperbarui.')
+            ->assertJsonPath('data.avatar_url', fn ($url) => is_string($url) && str_contains($url, 'avatars/'));
 
         $user->refresh();
         $this->assertNotNull($user->avatar_url);
         $this->assertNotSame('avatars/old-photo.jpg', $user->avatar_url);
         Storage::disk('public')->assertExists($user->avatar_url);
         Storage::disk('public')->assertMissing('avatars/old-photo.jpg');
+    }
+
+    public function test_update_profile_photo_validates_required_avatar_url(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/me/photo', []);
+
+        $response->assertUnprocessable()
+            ->assertJsonValidationErrors(['avatar_url']);
     }
 
     public function test_request_and_verify_whatsapp_otp_for_profile_update(): void

@@ -13,6 +13,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -35,25 +36,30 @@ class WarehouseMappingResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema
+            ->columns(1)
             ->components([
                 TextInput::make('csa_code')
                     ->label('Kode Gudang di CSA')
                     ->placeholder('Contoh: GMCRB, GMBDG, WMONL')
                     ->required()
-                    ->unique(ignoreRecord: true),
+                    ->unique(ignoreRecord: true)
+                    ->columnSpanFull(),
 
                 TextInput::make('csa_name')
                     ->label('Nama Gudang di CSA')
-                    ->placeholder('Contoh: GUDANG MSIS CIREBON'),
+                    ->placeholder('Contoh: GUDANG MSIS CIREBON')
+                    ->columnSpanFull(),
 
                 TextInput::make('target_sheet')
                     ->label('Target Tab Sheet di Google Spreadsheet')
                     ->placeholder('Contoh: CIREBON, BANDUNG, JAKARTA PIK')
-                    ->required(),
+                    ->required()
+                    ->columnSpanFull(),
 
                 Toggle::make('is_active')
                     ->label('Aktif')
-                    ->default(true),
+                    ->default(true)
+                    ->columnSpanFull(),
             ]);
     }
 
@@ -95,7 +101,9 @@ class WarehouseMappingResource extends Resource
                 //
             ])
             ->recordActions([
-                EditAction::make(),
+                EditAction::make()
+                    ->slideOver()
+                    ->modalWidth(Width::Medium),
                 DeleteAction::make(),
             ])
             ->toolbarActions([

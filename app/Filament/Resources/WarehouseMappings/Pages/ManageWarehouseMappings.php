@@ -5,6 +5,7 @@ namespace App\Filament\Resources\WarehouseMappings\Pages;
 use App\Filament\Resources\WarehouseMappings\WarehouseMappingResource;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ManageRecords;
+use Filament\Support\Enums\Width;
 
 class ManageWarehouseMappings extends ManageRecords
 {
@@ -13,7 +14,9 @@ class ManageWarehouseMappings extends ManageRecords
     protected function getHeaderActions(): array
     {
         return [
-            CreateAction::make(),
+            CreateAction::make()
+                ->slideOver()
+                ->modalWidth(Width::Medium),
         ];
     }
 }

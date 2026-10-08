@@ -81,6 +81,14 @@ class TrackingOrdersTable
                     ->tooltip(fn ($record) => $record->address)
                     ->searchable(),
 
+                TextColumn::make('latitude')
+                    ->label('Lat')
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('longitude')
+                    ->label('Long')
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()

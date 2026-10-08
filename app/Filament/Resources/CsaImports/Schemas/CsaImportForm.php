@@ -14,7 +14,7 @@ class CsaImportForm
             ->columns(1)
             ->components([
                 FileUpload::make('excel_file')
-                    ->label('File Excel (.xlsx)')
+                    ->label('File Excel')
                     ->disk('local')
                     ->directory('csa_imports')
                     ->acceptedFileTypes([
@@ -23,13 +23,11 @@ class CsaImportForm
                         'application/zip',
                     ])
                     ->required()
-                    ->maxSize(102400) // 100MB
-                    ->helperText('Contoh file: LAP PENJUALAN MSI SEPTEMBER 2026.xlsx'),
+                    ->maxSize(102400),
 
                 Checkbox::make('auto_sync')
-                    ->label('Otomatis langsung sinkronkan ke Google Spreadsheet setelah parsing selesai')
-                    ->default(false)
-                    ->helperText('Jika dicentang, seluruh data yang berhasil diagregasikan akan langsung dikirim ke masing-masing sheet cabang.'),
+                    ->label('Sinkronkan ke Google Spreadsheet')
+                    ->default(false),
             ]);
     }
 }

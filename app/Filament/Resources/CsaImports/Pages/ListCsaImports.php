@@ -19,10 +19,10 @@ class ListCsaImports extends ListRecords
     {
         return [
             CreateAction::make()
-                ->modalHeading('Upload Laporan Penjualan CSA')
-                ->modalDescription('Pilih file export laporan penjualan CSA (.xlsx) untuk diekstrak dan diagregasikan per Surat Jalan.')
-                ->modalSubmitActionLabel('Unggah & Mulai Proses')
-                ->modalWidth(Width::Large)
+                ->label('Upload Laporan')
+                ->modalHeading('Upload Laporan CSA')
+                ->modalSubmitActionLabel('Upload')
+                ->modalWidth(Width::Medium)
                 ->createAnother(false)
                 ->using(function (array $data): CsaImport {
                     $relativePath = $data['excel_file'];
@@ -50,7 +50,7 @@ class ListCsaImports extends ListRecords
                 ->successNotification(
                     Notification::make()
                         ->title('File berhasil diunggah')
-                        ->body('Proses ekstraksi dan agregasi data sedang berjalan di antrean latar belakang (Horizon).')
+                        ->body('Data sedang diproses di antrean.')
                         ->success()
                 ),
         ];

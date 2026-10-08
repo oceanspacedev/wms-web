@@ -27,6 +27,8 @@ class TrackingOrder extends Model
         'foto_nota_sj',
         'foto_penerima',
         'address',
+        'latitude',
+        'longitude',
         'status',
         'csa_shipment_id',
         'notes',
@@ -43,6 +45,8 @@ class TrackingOrder extends Model
             'tanggal_nota' => 'date',
             'tanggal_pengiriman' => 'date',
             'jumlah_value_nota' => 'decimal:2',
+            'latitude' => 'float',
+            'longitude' => 'float',
         ];
     }
 

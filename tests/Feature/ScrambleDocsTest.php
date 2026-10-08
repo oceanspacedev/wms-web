@@ -63,6 +63,12 @@ class ScrambleDocsTest extends TestCase
         $this->assertNotEmpty($response->json('paths./me.get.description'));
         $this->assertNotEmpty($response->json('components.schemas.AuthUserResource.properties.name.description'));
         $this->assertNotEmpty($response->json('components.schemas.TrackingOrderResource.properties.no_sj.description'));
+        $this->assertNotEmpty($response->json('components.schemas.TrackingOrderResource.properties.latitude.description'));
+        $this->assertNotEmpty($response->json('components.schemas.TrackingOrderResource.properties.longitude.description'));
         $this->assertNotEmpty($response->json('components.schemas.PurchaseOrderResource.properties.no_po.description'));
+
+        $photoSchema = json_encode($response->json('components.schemas.UpdateUserProfilePhotoRequest') ?? []);
+        $this->assertStringContainsString('avatar_url', (string) $photoSchema);
+        $this->assertStringNotContainsString('profile_photo', (string) $photoSchema);
     }
 }

@@ -27,7 +27,7 @@ class TrackingOrderApiController extends Controller
 
     #[Endpoint(
         title: 'Buat surat jalan baru',
-        description: 'Menyimpan SJ dengan no_sj, nama_dealer, alamat, nominal, tanggal, kurir, dan foto. Response `data` adalah TrackingOrderResource.',
+        description: 'Menyimpan SJ dengan no_sj, nama_dealer, alamat, nominal, tanggal, kurir, koordinat (latitude, longitude), dan foto. Response `data` adalah TrackingOrderResource.',
     )]
     public function store(CreateTrackingOrderRequest $request): JsonResponse
     {
@@ -47,6 +47,8 @@ class TrackingOrderApiController extends Controller
             'nama_pengirim' => $senderName,
             'nama_penerima' => $validated['nama_penerima'] ?? null,
             'address' => $validated['address'] ?? ($validated['alamat_dealer'] ?? null),
+            'latitude' => isset($validated['latitude']) && $validated['latitude'] !== null ? (float) $validated['latitude'] : null,
+            'longitude' => isset($validated['longitude']) && $validated['longitude'] !== null ? (float) $validated['longitude'] : null,
             'status' => $validated['status'] ?? 'IN_TRANSIT',
             'notes' => $validated['notes'] ?? null,
         ];
@@ -212,14 +214,6 @@ class TrackingOrderApiController extends Controller
                 $address = $trackingOrder->address ?: $trackingOrder->alamat_dealer;
             }
 
-            // Append GPS coordinates tag to address if GPS is present and not already in address text
-            if ($latitude !== null && $longitude !== null) {
-                $coordsTag = "GPS: [{$latitude}, {$longitude}]";
-                if (! str_contains((string) $address, 'GPS: [')) {
-                    $address = $address ? "{$address} ({$coordsTag})" : $coordsTag;
-                }
-            }
-
             // 3. Prepare watermark info for photo overlay (GPS Map Camera style)
             $watermarkInfo = [
                 'address' => $address,
@@ -257,9 +251,15 @@ class TrackingOrderApiController extends Controller
                 $trackingOrder->foto_penerima = "{$relativeDir}/{$filename}";
             }
 
-            // 6. Update tracking order record with the captured address & DELIVERED status
+            // 6. Update tracking order record with the captured address, coordinates & DELIVERED status
             $trackingOrder->nama_penerima = $validated['nama_penerima'];
             $trackingOrder->address = $address;
+            if ($latitude !== null) {
+                $trackingOrder->latitude = $latitude;
+            }
+            if ($longitude !== null) {
+                $trackingOrder->longitude = $longitude;
+            }
             $trackingOrder->status = 'DELIVERED';
 
             if (! empty($validated['nama_pengirim'])) {

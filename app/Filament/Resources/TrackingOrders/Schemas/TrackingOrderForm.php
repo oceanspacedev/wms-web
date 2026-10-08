@@ -84,6 +84,19 @@ class TrackingOrderForm
 
                         Grid::make(2)
                             ->schema([
+                                TextInput::make('latitude')
+                                    ->label('Latitude')
+                                    ->numeric()
+                                    ->placeholder('Contoh: -6.917464'),
+
+                                TextInput::make('longitude')
+                                    ->label('Longitude')
+                                    ->numeric()
+                                    ->placeholder('Contoh: 107.619123'),
+                            ]),
+
+                        Grid::make(2)
+                            ->schema([
                                 FileUpload::make('foto_nota_sj')
                                     ->label('Foto Nota Surat Jalan')
                                     ->image()
