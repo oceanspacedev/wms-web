@@ -66,6 +66,8 @@ class CsaShipmentForm
                     ->columnSpanFull(),
                 Toggle::make('is_synced')
                     ->required(),
+                Toggle::make('already_in_sheet')
+                    ->label('Data yang sama sudah ada di sheet (dilewati)'),
                 DateTimePicker::make('synced_at'),
                 Textarea::make('sync_error')
                     ->columnSpanFull(),

@@ -31,16 +31,26 @@ class CreateCsaImport extends CreateRecord
             'total_synced' => 0,
         ]);
 
+        $processImmediately = (bool) ($data['process_immediately'] ?? false);
         $autoSync = (bool) ($data['auto_sync'] ?? false);
 
-        // Dispatch background job to process Excel in Horizon
-        ProcessCsaImportJob::dispatch($record, $autoSync);
+        if ($processImmediately || config('queue.default') === 'sync') {
+            ProcessCsaImportJob::dispatchSync($record, $autoSync);
 
-        Notification::make()
-            ->title('File berhasil diunggah')
-            ->body('Proses ekstraksi dan agregasi data sedang berjalan di antrean latar belakang (Horizon).')
-            ->success()
-            ->send();
+            Notification::make()
+                ->title('File Berhasil Diproses')
+                ->body('Data berhasil diekstrak dan siap diperiksa.')
+                ->success()
+                ->send();
+        } else {
+            ProcessCsaImportJob::dispatch($record, $autoSync);
+
+            Notification::make()
+                ->title('File Berhasil Diunggah')
+                ->body('Proses ekstraksi sedang berjalan di antrean latar belakang.')
+                ->info()
+                ->send();
+        }
 
         return $record;
     }

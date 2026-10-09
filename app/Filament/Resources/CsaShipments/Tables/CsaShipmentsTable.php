@@ -79,10 +79,15 @@ class CsaShipmentsTable
                 IconColumn::make('is_synced')
                     ->label('Synced')
                     ->boolean()
-                    ->trueIcon('heroicon-o-check-circle')
+                    ->trueIcon(fn (CsaShipment $record): string => $record->already_in_sheet ? 'heroicon-o-document-duplicate' : 'heroicon-o-check-circle')
                     ->falseIcon('heroicon-o-clock')
-                    ->trueColor('success')
+                    ->trueColor(fn (CsaShipment $record): string => $record->already_in_sheet ? 'info' : 'success')
                     ->falseColor('warning')
+                    ->tooltip(fn (CsaShipment $record): string => match (true) {
+                        ! $record->is_synced => 'Belum terkirim ke sheet',
+                        $record->already_in_sheet => 'Data yang sama (No SJ & total nominal) sudah ada di sheet, dilewati & tidak ditimpa',
+                        default => 'Ditulis ke sheet',
+                    })
                     ->sortable(),
 
                 TextColumn::make('reff_note')
@@ -115,6 +120,11 @@ class CsaShipmentsTable
                     ->label('Status Sinkronisasi')
                     ->trueLabel('Sudah Terkirim ke Sheet')
                     ->falseLabel('Belum Terkirim ke Sheet'),
+
+                TernaryFilter::make('already_in_sheet')
+                    ->label('Data Sama Sudah Ada di Sheet')
+                    ->trueLabel('Ya, dilewati (tidak ditimpa)')
+                    ->falseLabel('Tidak, ditulis baru'),
             ])
             ->recordActions([
                 EditAction::make(),

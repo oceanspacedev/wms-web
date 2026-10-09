@@ -43,6 +43,7 @@ class CsaShipment extends Model
         'tanggal_diterima',
         'ket_isi_unit',
         'is_synced',
+        'already_in_sheet',
         'synced_at',
         'sync_error',
     ];
@@ -60,6 +61,7 @@ class CsaShipment extends Model
         'qty_koli' => 'integer',
         'berat' => 'decimal:2',
         'is_synced' => 'boolean',
+        'already_in_sheet' => 'boolean',
         'synced_at' => 'datetime',
     ];
 

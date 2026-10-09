@@ -37,7 +37,7 @@ return [
 
     'google_sheets' => [
         'webhook_url' => env('GOOGLE_SHEET_WEBHOOK_URL', ''),
-        'spreadsheet_id' => env('GOOGLE_SPREADSHEET_ID', '1AQ7h3_bPRpCcCy5CZav7vfe1p_flt7mWRLUr0byw1a0'),
+        'spreadsheet_id' => env('GOOGLE_SPREADSHEET_ID', '1oBtqSEj0IZKzZAMQKquuyve242uKPEzShn4-uI92cCE'),
         'rates_csv_url' => env('GOOGLE_SHEET_RATES_CSV_URL', 'https://docs.google.com/spreadsheets/d/1fd-3VqrxFxU_1icUOh2AaKlNulOQKF-32A3WJ2UeLn4/export?format=csv&gid=1319753844'),
         'rates_cache_db' => storage_path('app/freight_rates.sqlite'),
     ],

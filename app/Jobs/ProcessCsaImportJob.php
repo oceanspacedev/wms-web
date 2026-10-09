@@ -24,7 +24,8 @@ class ProcessCsaImportJob implements ShouldQueue
      */
     public function __construct(
         public CsaImport $csaImport,
-        public bool $autoSyncToSheet = false
+        public bool $autoSyncToSheet = false,
+        public bool $syncImmediately = false
     ) {}
 
     /**
@@ -101,7 +102,11 @@ class ProcessCsaImportJob implements ShouldQueue
             ]);
 
             if ($this->autoSyncToSheet) {
-                SyncToGoogleSheetJob::dispatch($this->csaImport);
+                if ($this->syncImmediately) {
+                    SyncToGoogleSheetJob::dispatchSync($this->csaImport);
+                } else {
+                    SyncToGoogleSheetJob::dispatch($this->csaImport);
+                }
             }
         } catch (Exception $e) {
             Log::error('Error processing CSA import: '.$e->getMessage(), [

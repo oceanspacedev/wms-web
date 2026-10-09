@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\GoogleSheetWebhookService;
 use Database\Seeders\WarehouseMappingSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -131,5 +132,120 @@ class CsaImportPipelineTest extends TestCase
             'id' => $shipment->id,
             'is_synced' => true,
         ]);
+    }
+
+    public function test_ekspedisi_is_normalized_to_google_sheet_dropdown_values(): void
+    {
+        [$jnt, $shopee] = $this->createShipments('JAKARTA PIK', 2)->all();
+        $jnt->update(['nama_ekspedisi' => 'J&T Express']);
+        $shopee->update(['nama_ekspedisi' => 'Shopee Xpress']);
+
+        $service = new GoogleSheetWebhookService;
+
+        $this->assertSame('J&T', $service->transformShipmentToRow($jnt)[15]);
+        $this->assertSame('Shopee Xpress', $service->transformShipmentToRow($shopee)[15]);
+        $this->assertDatabaseHas('csa_shipments', ['id' => $jnt->id, 'nama_ekspedisi' => 'J&T Express']);
+    }
+
+    public function test_google_sheet_sync_flags_rows_already_in_sheet_without_overwriting(): void
+    {
+        $shipments = $this->createShipments('BANDUNG', 3);
+
+        Http::fake([
+            'https://script.google.com/*' => Http::response([
+                'status' => 'success',
+                'inserted' => 2,
+                'skipped_duplicate' => 1,
+                'skipped_indexes' => [1],
+            ], 200),
+        ]);
+
+        $result = (new GoogleSheetWebhookService('https://script.google.com/macros/s/test/exec'))
+            ->syncShipments($shipments);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame(2, $result['inserted']);
+        $this->assertSame(1, $result['skipped']);
+
+        $this->assertDatabaseHas('csa_shipments', ['id' => $shipments[0]->id, 'is_synced' => true, 'already_in_sheet' => false]);
+        $this->assertDatabaseHas('csa_shipments', ['id' => $shipments[1]->id, 'is_synced' => true, 'already_in_sheet' => true]);
+        $this->assertDatabaseHas('csa_shipments', ['id' => $shipments[2]->id, 'is_synced' => true, 'already_in_sheet' => false]);
+    }
+
+    public function test_google_sheet_sync_resets_highlight_only_until_first_chunk_that_inserts(): void
+    {
+        $shipments = $this->createShipments('BANDUNG', 250);
+        $requestCount = 0;
+
+        Http::fake(function () use (&$requestCount) {
+            $requestCount++;
+
+            // Batch pertama semua sudah ada di sheet, batch berikutnya tertulis
+            return $requestCount === 1
+                ? Http::response(['status' => 'success', 'inserted' => 0, 'skipped_indexes' => range(0, 99)], 200)
+                : Http::response(['status' => 'success', 'inserted' => 100, 'skipped_indexes' => []], 200);
+        });
+
+        (new GoogleSheetWebhookService('https://script.google.com/macros/s/test/exec'))
+            ->syncShipments($shipments);
+
+        $resetFlags = Http::recorded()->map(fn (array $pair) => $pair[0]->data()['resetHighlight'])->all();
+
+        $this->assertSame([true, true, false], $resetFlags);
+    }
+
+    public function test_google_sheet_sync_can_resend_without_resetting_highlight(): void
+    {
+        $shipments = $this->createShipments('BANDUNG', 150);
+
+        Http::fake(fn () => Http::response(['status' => 'success', 'inserted' => 100, 'skipped_indexes' => []], 200));
+
+        (new GoogleSheetWebhookService('https://script.google.com/macros/s/test/exec'))
+            ->syncShipments($shipments, resetHighlight: false);
+
+        $resetFlags = Http::recorded()->map(fn (array $pair) => $pair[0]->data()['resetHighlight'])->all();
+
+        $this->assertSame([false, false], $resetFlags);
+    }
+
+    public function test_google_sheet_sync_does_not_mark_synced_when_apps_script_returns_error(): void
+    {
+        $shipments = $this->createShipments('BANDUNG', 1);
+
+        Http::fake([
+            'https://script.google.com/*' => Http::response([
+                'status' => 'error',
+                'message' => 'Server sheet sedang sibuk, silakan coba beberapa saat lagi.',
+            ], 200),
+        ]);
+
+        $result = (new GoogleSheetWebhookService('https://script.google.com/macros/s/test/exec'))
+            ->syncShipments($shipments);
+
+        $this->assertFalse($result['success']);
+        $this->assertDatabaseHas('csa_shipments', ['id' => $shipments[0]->id, 'is_synced' => false]);
+        $this->assertStringContainsString('sedang sibuk', $shipments[0]->fresh()->sync_error);
+    }
+
+    /**
+     * @return Collection<int, CsaShipment>
+     */
+    private function createShipments(string $targetSheet, int $count): Collection
+    {
+        $import = CsaImport::create([
+            'user_id' => User::factory()->create()->id,
+            'file_name' => 'test.xlsx',
+            'file_path' => '/tmp/test.xlsx',
+            'status' => 'completed',
+        ]);
+
+        return collect(range(1, $count))->map(fn (int $i) => CsaShipment::create([
+            'csa_import_id' => $import->id,
+            'no_sj' => 'SJ-'.$targetSheet.'-'.$i,
+            'target_sheet' => $targetSheet,
+            'kode_gudang' => 'GMBDG',
+            'total_nominal_sj' => 1000000,
+            'qty_unit' => 1,
+        ]));
     }
 }

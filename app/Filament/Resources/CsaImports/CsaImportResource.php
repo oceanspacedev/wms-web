@@ -47,7 +47,7 @@ class CsaImportResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            RelationManagers\ShipmentsRelationManager::class,
         ];
     }
 

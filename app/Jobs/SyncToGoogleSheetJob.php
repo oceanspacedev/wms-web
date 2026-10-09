@@ -24,7 +24,8 @@ class SyncToGoogleSheetJob implements ShouldQueue
     public function __construct(
         public CsaImport $csaImport,
         public ?string $targetSheet = null,
-        public ?string $overrideWebhookUrl = null
+        public ?string $overrideWebhookUrl = null,
+        public bool $resetHighlight = true
     ) {}
 
     /**
@@ -49,7 +50,7 @@ class SyncToGoogleSheetJob implements ShouldQueue
         }
 
         try {
-            $result = $webhookService->syncShipments($shipments);
+            $result = $webhookService->syncShipments($shipments, $this->resetHighlight);
 
             // Update total synced count on parent import
             $syncedCount = $this->csaImport->shipments()->where('is_synced', true)->count();

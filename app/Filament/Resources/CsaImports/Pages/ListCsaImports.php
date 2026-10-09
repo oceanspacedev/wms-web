@@ -40,19 +40,25 @@ class ListCsaImports extends ListRecords
                         'total_synced' => 0,
                     ]);
 
+                    $processImmediately = (bool) ($data['process_immediately'] ?? false);
                     $autoSync = (bool) ($data['auto_sync'] ?? false);
 
-                    // Dispatch background job to process Excel in Horizon
-                    ProcessCsaImportJob::dispatch($record, $autoSync);
+                    if ($processImmediately) {
+                        ProcessCsaImportJob::dispatchSync($record, $autoSync, true);
+                    } else {
+                        ProcessCsaImportJob::dispatch($record, $autoSync, false);
+                    }
 
                     return $record;
                 })
-                ->successNotification(
-                    Notification::make()
+                ->successNotification(function (array $data) {
+                    $processImmediately = (bool) ($data['process_immediately'] ?? false);
+
+                    return Notification::make()
                         ->title('File berhasil diunggah')
-                        ->body('Data sedang diproses di antrean.')
-                        ->success()
-                ),
+                        ->body($processImmediately ? 'Data telah berhasil langsung diproses dan diekstrak.' : 'Data sedang diproses di antrean queue.')
+                        ->success();
+                }),
         ];
     }
 }

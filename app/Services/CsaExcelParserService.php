@@ -352,7 +352,7 @@ class CsaExcelParserService
         $brand = trim($this->cell($cells, $map, 'brand'));
         $reffNote = trim($this->cell($cells, $map, 'reff_note'));
         $namaBarang = trim($this->cell($cells, $map, 'nama_barang'));
-        $resi = $this->reader->normalizeIdentifier($this->cell($cells, $map, 'resi'));
+        [$namaEkspedisi, $noResiAwb] = $this->resolveEkspedisiAndResi($this->cell($cells, $map, 'resi'));
 
         if (! isset($grouped[$key])) {
             $grouped[$key] = $this->blankShipment($key, $noSj, [
@@ -367,8 +367,16 @@ class CsaExcelParserService
                 'tujuan_dealer' => $customer,
                 'brand' => $brand,
                 'reff_note' => $reffNote,
-                'no_resi_awb' => $resi !== '' ? $resi : null,
+                'nama_ekspedisi' => $namaEkspedisi,
+                'no_resi_awb' => $noResiAwb,
             ]);
+        } else {
+            if ($grouped[$key]['nama_ekspedisi'] === null && $namaEkspedisi !== null) {
+                $grouped[$key]['nama_ekspedisi'] = $namaEkspedisi;
+            }
+            if ($grouped[$key]['no_resi_awb'] === null && $noResiAwb !== null) {
+                $grouped[$key]['no_resi_awb'] = $noResiAwb;
+            }
         }
 
         $grouped[$key]['qty_unit'] += $qty;
@@ -394,7 +402,17 @@ class CsaExcelParserService
     protected function accumulateDepotRow(array $cells, array $map, array &$grouped, string $sheetName): void
     {
         $noSj = $this->reader->normalizeIdentifier($this->cell($cells, $map, 'no_sj'));
+        $namaEkspedisi = trim($this->cell($cells, $map, 'nama_ekspedisi'));
         $noResi = $this->reader->normalizeIdentifier($this->cell($cells, $map, 'no_resi_awb'));
+
+        if ($namaEkspedisi === '' && $noResi !== '') {
+            [$resolvedEksp, $resolvedResi] = $this->resolveEkspedisiAndResi($noResi);
+            if ($resolvedEksp !== null) {
+                $namaEkspedisi = $resolvedEksp;
+                $noResi = $resolvedResi ?? '';
+            }
+        }
+
         $depo = trim($this->cell($cells, $map, 'depo'));
         $targetSheet = $depo !== '' ? $depo : $sheetName;
         $key = $targetSheet.'|'.($noSj !== '' ? $noSj : $noResi);
@@ -423,7 +441,7 @@ class CsaExcelParserService
                 'brand' => trim($this->cell($cells, $map, 'brand')) ?: null,
                 'reff_note' => trim($this->cell($cells, $map, 'reff_note')) ?: null,
                 'ketentuan_biaya_kirim' => trim($this->cell($cells, $map, 'ketentuan_biaya_kirim')) ?: null,
-                'nama_ekspedisi' => trim($this->cell($cells, $map, 'nama_ekspedisi')) ?: null,
+                'nama_ekspedisi' => $namaEkspedisi !== '' ? $namaEkspedisi : null,
                 'no_resi_awb' => $noResi !== '' ? $noResi : null,
                 'biaya_kirim' => $biaya !== '' && is_numeric($biaya) ? (float) $biaya : null,
                 'status_pembayaran' => trim($this->cell($cells, $map, 'status_pembayaran')) ?: null,
@@ -588,5 +606,101 @@ class CsaExcelParserService
         $date = date_create((string) $excelDate);
 
         return $date ? date_format($date, 'Y-m-d') : null;
+    }
+
+    /**
+     * Parse raw string from Excel "Nomor Resi" column to intelligently separate Expedition and Tracking Number.
+     *
+     * @return array{0: ?string, 1: ?string} [nama_ekspedisi, no_resi_awb]
+     */
+    public function resolveEkspedisiAndResi(?string $raw): array
+    {
+        $raw = trim((string) $raw);
+        if ($raw === '' || $raw === '-' || $raw === '0') {
+            return [null, null];
+        }
+
+        $upper = strtoupper($raw);
+
+        // 1. Kurir internal
+        $internalCouriers = ['MOCH ARIP', 'SUJAEDI', 'ANDY'];
+        if (in_array($upper, $internalCouriers, true)) {
+            return ['INTERNAL ('.$raw.')', null];
+        }
+
+        if ($upper === 'REFUND') {
+            return ['REFUND', null];
+        }
+
+        if ($upper === 'CASH ONLINE') {
+            return ['CASH ONLINE', null];
+        }
+
+        // 2. Awalan EXPEDISI / EKSPEDISI / EXP / EKSP
+        if (preg_match('/^(EXPEDISI|EKSPEDISI|EXP|EKSP)\s+(.*)$/i', $raw, $matches)) {
+            $nama = trim($matches[2]);
+            $upperNama = strtoupper($nama);
+            $canonical = match (true) {
+                str_contains($upperNama, 'J&T') || str_contains($upperNama, 'JNT') => 'J&T Express',
+                str_contains($upperNama, '21 EXPRESS') || str_contains($upperNama, '21 EXPRES') => '21 EXPRES',
+                str_contains($upperNama, 'RAX') => 'RAX',
+                str_contains($upperNama, 'KARYA MANDIRI') => 'KARYA MANDIRI',
+                str_contains($upperNama, 'SENTRAL CARGO') => 'SENTRAL CARGO',
+                str_contains($upperNama, 'WHIDI UTAMA') => 'WHIDI UTAMA',
+                default => $nama,
+            };
+
+            return [$canonical, null];
+        }
+
+        // 3. Nama ekspedisi tanpa awalan EXPEDISI
+        $knownExpeditions = [
+            'PO BERSAUDARA' => 'PO BERSAUDARA',
+            'J&T' => 'J&T Express',
+            'J&T EXPRESS' => 'J&T Express',
+            'JNT' => 'J&T Express',
+            'JNE' => 'JNE Express',
+            'SICEPAT' => 'SiCepat Ekspres',
+            '21 EXPRESS' => '21 EXPRES',
+            '21 EXPRES' => '21 EXPRES',
+            'KARYA MANDIRI' => 'KARYA MANDIRI',
+            'SENTRAL CARGO' => 'SENTRAL CARGO',
+            'WHIDI UTAMA' => 'WHIDI UTAMA',
+            'ID EXPRESS' => 'ID EXPRES',
+            'ANTERAJA' => 'Anteraja',
+            'WAHANA' => 'Wahana',
+            'INDAH CARGO' => 'Indah Cargo',
+            'DAKOTA' => 'Dakota Cargo',
+            'LION PARCEL' => 'Lion Parcel',
+            'LIONEL' => 'LIONEL EXPRESS',
+        ];
+
+        if (isset($knownExpeditions[$upper])) {
+            return [$knownExpeditions[$upper], null];
+        }
+
+        // 4. Deteksi ekspedisi dari pola prefix nomor resi / AWB
+        if (str_starts_with($upper, 'SPXID') || str_starts_with($upper, 'SPX')) {
+            return ['Shopee Xpress', $raw];
+        }
+        if (
+            str_starts_with($upper, 'JX') ||
+            str_starts_with($upper, 'JP') ||
+            str_starts_with($upper, 'JY') ||
+            str_starts_with($upper, 'IDB') ||
+            str_starts_with($upper, 'ID26') ||
+            str_starts_with($upper, 'CM')
+        ) {
+            return ['J&T Express', $raw];
+        }
+        if (str_starts_with($upper, 'BLIG') || str_starts_with($upper, 'BLIGO')) {
+            return ['Blibli Express', $raw];
+        }
+        if (str_starts_with($upper, 'GK-')) {
+            return ['Gojek', $raw];
+        }
+
+        // 5. Default: Nilai adalah nomor resi / AWB
+        return [null, $raw];
     }
 }
