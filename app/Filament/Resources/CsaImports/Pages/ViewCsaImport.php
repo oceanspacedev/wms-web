@@ -8,7 +8,6 @@ use App\Jobs\SyncToGoogleSheetJob;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Schema;
@@ -28,31 +27,6 @@ class ViewCsaImport extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('processNow')
-                ->label('Proses Sekarang (Langsung)')
-                ->icon('heroicon-o-bolt')
-                ->color('warning')
-                ->visible(fn (): bool => in_array($this->record->status, ['pending', 'failed']))
-                ->action(function (): void {
-                    ProcessCsaImportJob::dispatchSync($this->record);
-
-                    $this->record->refresh();
-
-                    if ($this->record->status === 'completed') {
-                        Notification::make()
-                            ->title('Ekstraksi Berhasil')
-                            ->body("Berhasil mengekstrak {$this->record->total_shipments} data Surat Jalan.")
-                            ->success()
-                            ->send();
-                    } else {
-                        Notification::make()
-                            ->title('Ekstraksi Gagal')
-                            ->body($this->record->error_message ?: 'Terjadi kesalahan saat memproses file.')
-                            ->danger()
-                            ->send();
-                    }
-                }),
-
             Action::make('syncToSheets')
                 ->label('Kirim ke Google Spreadsheet')
                 ->icon('heroicon-o-cloud-arrow-up')
@@ -79,43 +53,28 @@ class ViewCsaImport extends ViewRecord
 
                             return $options;
                         }),
-
-                    Toggle::make('run_immediately')
-                        ->label('Kirim Langsung (Tanpa Menunggu Queue Worker)')
-                        ->default(true)
-                        ->helperText('Jika aktif, data langsung dikirim detik ini juga tanpa perlu antrean background.'),
                 ])
                 ->action(function (array $data): void {
-                    $targetSheet = $data['target_sheet'] ?? null;
-                    $webhookUrl = $data['webhook_url'];
-                    $runImmediately = (bool) ($data['run_immediately'] ?? true);
+                    // Selalu lewat antrean: sinkron laporan sebulan bisa lebih dari 1 jam
+                    SyncToGoogleSheetJob::dispatch($this->record, $data['target_sheet'] ?? null, $data['webhook_url']);
 
-                    if ($runImmediately) {
-                        SyncToGoogleSheetJob::dispatchSync($this->record, $targetSheet, $webhookUrl);
-                        $this->record->refresh();
-
-                        Notification::make()
-                            ->title('Sinkronisasi Selesai')
-                            ->body('Data pengiriman berhasil langsung dikirim ke Google Spreadsheet.')
-                            ->success()
-                            ->send();
-                    } else {
-                        SyncToGoogleSheetJob::dispatch($this->record, $targetSheet, $webhookUrl);
-
-                        Notification::make()
-                            ->title('Proses Sinkronisasi Dimasukkan ke Antrean')
-                            ->body('Data sedang diproses. Pastikan php artisan queue:work sedang berjalan.')
-                            ->info()
-                            ->send();
-                    }
+                    Notification::make()
+                        ->title('Sinkronisasi Berjalan di Belakang Layar')
+                        ->body('Data dikirim bertahap ke Google Spreadsheet. Progres terlihat di kolom SJ Tersinkron.')
+                        ->info()
+                        ->send();
                 }),
 
+            // Hanya untuk import yang belum berhasil: ekstraksi ulang import "Selesai" akan menggandakan data SJ
             Action::make('reprocess')
                 ->label('Ekstraksi Ulang File')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
+                ->visible(fn (): bool => in_array($this->record->status, ['pending', 'failed']))
                 ->requiresConfirmation()
                 ->action(function (): void {
+                    $this->record->update(['status' => 'pending', 'error_message' => null]);
+
                     ProcessCsaImportJob::dispatch($this->record);
 
                     Notification::make()

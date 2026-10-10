@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Filament\Resources\CsaImports\Pages\ListCsaImports;
 use App\Jobs\ProcessCsaImportJob;
+use App\Jobs\SyncToGoogleSheetJob;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -81,5 +82,8 @@ class CsaImportModalTest extends TestCase
         Queue::assertPushed(ProcessCsaImportJob::class, function (ProcessCsaImportJob $job): bool {
             return $job->autoSyncToSheet === true;
         });
+
+        // Upload tidak lagi memproses/menyinkronkan di dalam request
+        Queue::assertNotPushed(SyncToGoogleSheetJob::class);
     }
 }

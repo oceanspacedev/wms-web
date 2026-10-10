@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use Illuminate\Foundation\Auth\User as AuthUser;
 use App\Models\ExpeditionRateCard;
 use Illuminate\Auth\Access\HandlesAuthorization;
-use Illuminate\Foundation\Auth\User as AuthUser;
 
 class ExpeditionRateCardPolicy
 {
     use HandlesAuthorization;
-
+    
     public function viewAny(AuthUser $authUser): bool
     {
         return $authUser->can('ViewAny:ExpeditionRateCard');
@@ -71,4 +71,5 @@ class ExpeditionRateCardPolicy
     {
         return $authUser->can('Reorder:ExpeditionRateCard');
     }
+
 }

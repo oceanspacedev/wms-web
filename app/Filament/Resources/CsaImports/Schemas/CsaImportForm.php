@@ -23,16 +23,12 @@ class CsaImportForm
                         'application/zip',
                     ])
                     ->required()
-                    ->maxSize(102400),
-
-                Checkbox::make('process_immediately')
-                    ->label('Proses Langsung (Tanpa Antrean)')
-                    ->helperText('Jika dicentang, file akan langsung diekstrak saat ini juga tanpa perlu menjalankan worker antrean.')
-                    ->default(true),
+                    ->maxSize(102400)
+                    ->helperText('File disimpan dulu, lalu diekstrak di belakang layar. Status di tabel diperbarui otomatis.'),
 
                 Checkbox::make('auto_sync')
                     ->label('Otomatis Sinkronkan ke Google Spreadsheet')
-                    ->helperText('Jika dicentang, setelah file selesai diekstrak data akan langsung dikirim ke Google Spreadsheet cabang.')
+                    ->helperText('Jika dicentang, setelah file selesai diekstrak data dikirim bertahap ke Google Spreadsheet cabang, juga di belakang layar.')
                     ->default(true),
             ]);
     }

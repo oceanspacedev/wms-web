@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProcessCsaImportJob implements ShouldQueue
 {
@@ -20,12 +21,16 @@ class ProcessCsaImportJob implements ShouldQueue
     public int $timeout = 600;
 
     /**
+     * Jangan diulang otomatis: percobaan kedua akan menyisipkan data Surat Jalan dua kali.
+     */
+    public int $tries = 1;
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
         public CsaImport $csaImport,
-        public bool $autoSyncToSheet = false,
-        public bool $syncImmediately = false
+        public bool $autoSyncToSheet = false
     ) {}
 
     /**
@@ -33,6 +38,8 @@ class ProcessCsaImportJob implements ShouldQueue
      */
     public function handle(CsaExcelParserService $parser): void
     {
+        $this->ensureMemoryLimit();
+
         $this->csaImport->update([
             'status' => 'processing',
             'error_message' => null,
@@ -101,12 +108,9 @@ class ProcessCsaImportJob implements ShouldQueue
                 'status' => 'completed',
             ]);
 
+            // Sinkron ke Google Sheet selalu berjalan di antrean (bisa lebih dari 1 jam untuk laporan sebulan)
             if ($this->autoSyncToSheet) {
-                if ($this->syncImmediately) {
-                    SyncToGoogleSheetJob::dispatchSync($this->csaImport);
-                } else {
-                    SyncToGoogleSheetJob::dispatch($this->csaImport);
-                }
+                SyncToGoogleSheetJob::dispatch($this->csaImport);
             }
         } catch (Exception $e) {
             Log::error('Error processing CSA import: '.$e->getMessage(), [
@@ -118,6 +122,42 @@ class ProcessCsaImportJob implements ShouldQueue
                 'status' => 'failed',
                 'error_message' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Dipanggil worker jika job mati di luar try/catch (timeout, kehabisan memori),
+     * supaya status import tidak tertahan di "Sedang Diproses".
+     */
+    public function failed(?Throwable $exception): void
+    {
+        $this->csaImport->update([
+            'status' => 'failed',
+            'error_message' => 'Proses ekstraksi terhenti: '.($exception?->getMessage() ?: 'job antrean gagal'),
+        ]);
+    }
+
+    /**
+     * Laporan sebulan (±17 MB) butuh ±250 MB saat diekstrak, sedangkan memory_limit
+     * PHP CLI di server sering hanya 128 MB.
+     */
+    protected function ensureMemoryLimit(): void
+    {
+        $limit = (string) ini_get('memory_limit');
+
+        if ($limit === '-1') {
+            return;
+        }
+
+        $bytes = (int) $limit * match (strtoupper(substr($limit, -1))) {
+            'G' => 1024 ** 3,
+            'M' => 1024 ** 2,
+            'K' => 1024,
+            default => 1,
+        };
+
+        if ($bytes < 1024 ** 3) {
+            ini_set('memory_limit', '1024M');
         }
     }
 }

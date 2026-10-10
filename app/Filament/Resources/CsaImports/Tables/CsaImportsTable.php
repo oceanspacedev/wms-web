@@ -48,7 +48,8 @@ class CsaImportsTable
                         'processing' => 'Sedang Diproses',
                         'failed' => 'Gagal',
                         default => 'Menunggu Antrean',
-                    }),
+                    })
+                    ->tooltip(fn (CsaImport $record): ?string => $record->status === 'failed' ? $record->error_message : null),
 
                 TextColumn::make('total_raw_rows')
                     ->label('Item Baris')
@@ -76,34 +77,11 @@ class CsaImportsTable
                     ->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
+            // Ekstraksi & sinkron berjalan di antrean, jadi status dan jumlah SJ tersinkron perlu diperbarui berkala
+            ->poll('10s')
             ->recordActions([
                 ActionGroup::make([
                     ViewAction::make(),
-
-                    Action::make('processNow')
-                        ->label('Proses Sekarang')
-                        ->icon('heroicon-o-bolt')
-                        ->color('warning')
-                        ->visible(fn (CsaImport $record): bool => in_array($record->status, ['pending', 'failed']))
-                        ->action(function (CsaImport $record): void {
-                            ProcessCsaImportJob::dispatchSync($record);
-
-                            $record->refresh();
-
-                            if ($record->status === 'completed') {
-                                Notification::make()
-                                    ->title('Ekstraksi Berhasil')
-                                    ->body("Berhasil mengekstrak {$record->total_shipments} data Surat Jalan.")
-                                    ->success()
-                                    ->send();
-                            } else {
-                                Notification::make()
-                                    ->title('Ekstraksi Gagal')
-                                    ->body($record->error_message ?: 'Terjadi kesalahan saat memproses file.')
-                                    ->danger()
-                                    ->send();
-                            }
-                        }),
 
                     Action::make('syncToSheets')
                         ->label('Kirim ke Sheet')
@@ -139,18 +117,22 @@ class CsaImportsTable
                             SyncToGoogleSheetJob::dispatch($record, $targetSheet, $webhookUrl);
 
                             Notification::make()
-                                ->title('Sinkronisasi Dikirim ke Antrean')
-                                ->body('Data sedang dikirim ke Google Spreadsheet via background worker.')
-                                ->success()
+                                ->title('Sinkronisasi Berjalan di Belakang Layar')
+                                ->body('Data dikirim bertahap ke Google Spreadsheet. Progres terlihat di kolom SJ Tersinkron.')
+                                ->info()
                                 ->send();
                         }),
 
+                    // Hanya untuk import yang belum berhasil: ekstraksi ulang import "Selesai" akan menggandakan data SJ
                     Action::make('reprocess')
                         ->label('Proses Ulang')
                         ->icon('heroicon-o-arrow-path')
                         ->color('gray')
+                        ->visible(fn (CsaImport $record): bool => in_array($record->status, ['pending', 'failed']))
                         ->requiresConfirmation()
                         ->action(function (CsaImport $record): void {
+                            $record->update(['status' => 'pending', 'error_message' => null]);
+
                             ProcessCsaImportJob::dispatch($record);
 
                             Notification::make()

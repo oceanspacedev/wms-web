@@ -40,25 +40,17 @@ class ListCsaImports extends ListRecords
                         'total_synced' => 0,
                     ]);
 
-                    $processImmediately = (bool) ($data['process_immediately'] ?? false);
-                    $autoSync = (bool) ($data['auto_sync'] ?? false);
-
-                    if ($processImmediately) {
-                        ProcessCsaImportJob::dispatchSync($record, $autoSync, true);
-                    } else {
-                        ProcessCsaImportJob::dispatch($record, $autoSync, false);
-                    }
+                    // Upload hanya menyimpan file; ekstraksi (dan sinkron) berjalan di antrean agar request tidak timeout
+                    ProcessCsaImportJob::dispatch($record, (bool) ($data['auto_sync'] ?? false));
 
                     return $record;
                 })
-                ->successNotification(function (array $data) {
-                    $processImmediately = (bool) ($data['process_immediately'] ?? false);
-
-                    return Notification::make()
+                ->successNotification(
+                    Notification::make()
                         ->title('File berhasil diunggah')
-                        ->body($processImmediately ? 'Data telah berhasil langsung diproses dan diekstrak.' : 'Data sedang diproses di antrean queue.')
-                        ->success();
-                }),
+                        ->body('Data sedang diproses di belakang layar. Status di tabel akan diperbarui otomatis.')
+                        ->success()
+                ),
         ];
     }
 }

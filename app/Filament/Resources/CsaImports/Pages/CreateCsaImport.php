@@ -31,26 +31,14 @@ class CreateCsaImport extends CreateRecord
             'total_synced' => 0,
         ]);
 
-        $processImmediately = (bool) ($data['process_immediately'] ?? false);
-        $autoSync = (bool) ($data['auto_sync'] ?? false);
+        // Upload hanya menyimpan file; ekstraksi (dan sinkron) berjalan di antrean agar request tidak timeout
+        ProcessCsaImportJob::dispatch($record, (bool) ($data['auto_sync'] ?? false));
 
-        if ($processImmediately || config('queue.default') === 'sync') {
-            ProcessCsaImportJob::dispatchSync($record, $autoSync);
-
-            Notification::make()
-                ->title('File Berhasil Diproses')
-                ->body('Data berhasil diekstrak dan siap diperiksa.')
-                ->success()
-                ->send();
-        } else {
-            ProcessCsaImportJob::dispatch($record, $autoSync);
-
-            Notification::make()
-                ->title('File Berhasil Diunggah')
-                ->body('Proses ekstraksi sedang berjalan di antrean latar belakang.')
-                ->info()
-                ->send();
-        }
+        Notification::make()
+            ->title('File Berhasil Diunggah')
+            ->body('Data sedang diproses di belakang layar. Status akan diperbarui otomatis.')
+            ->info()
+            ->send();
 
         return $record;
     }
