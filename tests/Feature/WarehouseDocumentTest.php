@@ -140,6 +140,41 @@ class WarehouseDocumentTest extends TestCase
         $this->assertSame('DO 0105 scan.jpg', $items['b']['file_name']);
     }
 
+    public function test_scm_admin_picks_a_warehouse_first_then_its_po(): void
+    {
+        Queue::fake();
+        $this->fakeArsipPrograms([
+            $this->program('3', 'GTBDG', '2610000077'),
+            $this->program('2', 'GTC', '2610000079'),
+            ['id' => '4', 'title' => 'PO REALME', 'po_sj_number' => '2610000088', 'kode_gudang' => 'GTC', 'has_memo' => true],
+        ]);
+
+        $this->actingAs($this->scmAdmin());
+
+        // Semua kode gudang muncul, lengkap dengan jumlah PO yang belum ada Memo/DO
+        $this->assertSame([
+            'GTBDG' => 'GTBDG — 1 PO, 1 belum ada Memo/DO',
+            'GTC' => 'GTC — 2 PO, 1 belum ada Memo/DO',
+        ], WarehouseDocumentForm::warehouseOptions());
+
+        // Setelah gudang dipilih, hanya PO gudang itu yang tampil
+        $this->assertSame([
+            '2' => '2610000079 — Program A',
+            '4' => '2610000088 — PO REALME (sudah ada Memo/DO)',
+        ], WarehouseDocumentForm::programOptions('gtc'));
+
+        Livewire::test(ListWarehouseDocuments::class)
+            ->callAction('create', [
+                'kode_gudang' => 'GTC',
+                'arsip_program_id' => '2',
+                'file_path' => UploadedFile::fake()->create('2610000079.pdf', 100, 'application/pdf'),
+            ])
+            ->assertHasNoActionErrors();
+
+        $this->assertDatabaseHas('warehouse_documents', ['arsip_program_id' => '2', 'kode_gudang' => 'GTC', 'po_sj_number' => '2610000079']);
+        Queue::assertPushed(SendWarehouseDocumentToArsipJob::class);
+    }
+
     public function test_warehouse_staff_only_sees_documents_of_their_own_warehouse(): void
     {
         $own = $this->makeDocument('GDG-BDG-01');

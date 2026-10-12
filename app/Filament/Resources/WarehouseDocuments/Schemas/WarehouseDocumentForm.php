@@ -29,9 +29,26 @@ class WarehouseDocumentForm
         return $schema
             ->columns(1)
             ->components([
-                static::programSelect('arsip_program_id')
+                Select::make('kode_gudang')
+                    ->label('Kode Gudang')
+                    ->options(fn (): array => static::warehouseOptions())
+                    // Petugas gudang terkunci ke gudangnya sendiri; admin/staf SCM bisa memilih semua gudang
+                    ->default(fn (): ?string => static::currentUser()?->isWarehouseStaff() ? static::currentUser()->kode_gudang_arsip : null)
+                    ->disabled(fn (): bool => (bool) static::currentUser()?->isWarehouseStaff())
+                    ->searchable()
+                    ->required()
+                    ->live()
+                    ->afterStateUpdated(fn (Set $set) => $set('arsip_program_id', null))
+                    ->helperText('Pilih gudang dulu; daftar No. PO/SJ menyesuaikan.'),
+
+                Select::make('arsip_program_id')
                     ->label('No. PO/SJ')
-                    ->helperText('PO di SCM Arsip yang bisa Anda kirimi Memo/DO. Yang belum punya Memo/DO tampil paling atas.'),
+                    ->options(fn (Get $get): array => static::programOptions($get('kode_gudang')))
+                    ->disabled(fn (Get $get): bool => blank($get('kode_gudang')))
+                    ->placeholder(fn (Get $get): string => blank($get('kode_gudang')) ? 'Pilih kode gudang dulu' : 'Pilih PO')
+                    ->searchable()
+                    ->required()
+                    ->helperText('Yang belum punya Memo/DO tampil paling atas.'),
 
                 static::fileUpload('file_path')
                     ->storeFileNamesIn('original_name')
@@ -125,13 +142,40 @@ class WarehouseDocumentForm
     }
 
     /**
+     * Kode gudang yang punya PO di SCM Arsip, beserta jumlah PO yang belum punya Memo/DO.
+     *
      * @return array<string, string>
      */
-    public static function programOptions(): array
+    public static function warehouseOptions(): array
     {
         return collect(static::availablePrograms())
+            ->groupBy('kode_gudang')
+            ->sortKeys()
+            ->map(fn ($programs, string $kodeGudang): string => sprintf(
+                '%s — %d PO, %d belum ada Memo/DO',
+                $kodeGudang,
+                $programs->count(),
+                $programs->filter(fn (array $program): bool => empty($program['has_memo']))->count(),
+            ))
+            ->all();
+    }
+
+    /**
+     * Pilihan PO; jika kode gudang diisi, hanya PO gudang itu (tanpa awalan kode gudang di label).
+     *
+     * @return array<string, string>
+     */
+    public static function programOptions(?string $kodeGudang = null): array
+    {
+        $kodeGudang = mb_strtolower(trim((string) $kodeGudang));
+
+        return collect(static::availablePrograms())
+            ->when($kodeGudang !== '', fn ($programs) => $programs->filter(
+                fn (array $program): bool => mb_strtolower(trim((string) $program['kode_gudang'])) === $kodeGudang
+            ))
             ->mapWithKeys(fn (array $program): array => [
-                (string) $program['id'] => $program['kode_gudang'].' · '.($program['po_sj_number'] ?: $program['id']).' — '.$program['title']
+                (string) $program['id'] => ($kodeGudang === '' ? $program['kode_gudang'].' · ' : '')
+                    .($program['po_sj_number'] ?: $program['id']).' — '.$program['title']
                     .(! empty($program['has_memo']) ? ' (sudah ada Memo/DO)' : ''),
             ])
             ->all();
@@ -170,6 +214,13 @@ class WarehouseDocumentForm
             ->options(fn (): array => static::programOptions())
             ->searchable()
             ->required();
+    }
+
+    private static function currentUser(): ?User
+    {
+        $user = auth()->user();
+
+        return $user instanceof User ? $user : null;
     }
 
     private static function fileUpload(string $name): FileUpload

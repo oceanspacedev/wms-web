@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use Illuminate\Foundation\Auth\User as AuthUser;
 use App\Models\WarehouseDocument;
 use Illuminate\Auth\Access\HandlesAuthorization;
-use Illuminate\Foundation\Auth\User as AuthUser;
 
 class WarehouseDocumentPolicy
 {
     use HandlesAuthorization;
-
+    
     public function viewAny(AuthUser $authUser): bool
     {
         return $authUser->can('ViewAny:WarehouseDocument');
@@ -71,4 +71,5 @@ class WarehouseDocumentPolicy
     {
         return $authUser->can('Reorder:WarehouseDocument');
     }
+
 }
