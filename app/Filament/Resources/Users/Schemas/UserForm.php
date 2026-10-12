@@ -142,6 +142,12 @@ class UserForm
                                 ->multiple()
                                 ->preload()
                                 ->searchable(),
+
+                            TextInput::make('kode_gudang_arsip')
+                                ->label('Kode Gudang Arsip')
+                                ->placeholder('GDG-BDG-01')
+                                ->maxLength(50)
+                                ->helperText('Untuk akun petugas gudang (role "gudang" + "panel_user"). Menentukan PO di SCM Arsip yang bisa dikirimi Memo/DO.'),
                         ]),
                 ])
                     ->columnSpan(['lg' => 1]),

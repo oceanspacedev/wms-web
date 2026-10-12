@@ -42,6 +42,12 @@ return [
         'rates_cache_db' => storage_path('app/freight_rates.sqlite'),
     ],
 
+    // Dokumen Gudang (Memo/DO) diteruskan ke SCM Arsip; token sama dengan WHMS_INTEGRATION_TOKEN di SCM Arsip
+    'scm_arsip' => [
+        'url' => env('SCM_ARSIP_URL'),
+        'token' => env('SCM_ARSIP_TOKEN'),
+    ],
+
     'whatsapp' => [
         'otp_expires_in' => (int) env('WHATSAPP_OTP_EXPIRES_IN', 300),
     ],

@@ -18,7 +18,7 @@ use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
-#[Fillable(['name', 'username', 'email', 'email_verified_at', 'password', 'whatsapp_number', 'whatsapp_verified_at', 'avatar_url'])]
+#[Fillable(['name', 'username', 'email', 'email_verified_at', 'password', 'whatsapp_number', 'whatsapp_verified_at', 'avatar_url', 'kode_gudang_arsip'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser, HasAvatar
 {
@@ -86,6 +86,14 @@ class User extends Authenticatable implements FilamentUser, HasAvatar
     public function canBeImpersonated(): bool
     {
         return ! $this->hasRole('super_admin');
+    }
+
+    /**
+     * Petugas gudang hanya boleh melihat & mengirim dokumen untuk kode gudang di akunnya sendiri.
+     */
+    public function isWarehouseStaff(): bool
+    {
+        return $this->hasRole('gudang') && ! $this->hasRole('super_admin');
     }
 
     public function getFilamentAvatarUrl(): ?string
