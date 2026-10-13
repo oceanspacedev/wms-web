@@ -29,10 +29,10 @@ class ListWarehouseDocuments extends ListRecords
                 ->visible(fn (): bool => WarehouseDocumentResource::canCreate())
                 ->disabled(fn (): bool => $this->warehouseCodeMissing())
                 ->modalHeading('Upload banyak Memo/DO ke SCM Arsip')
-                ->modalDescription('PO tujuan ditebak dari nama file. Periksa tabelnya, pilih PO untuk file yang belum terisi, lalu kirim.')
                 ->modalSubmitActionLabel('Kirim semua')
-                ->modalWidth(Width::FourExtraLarge)
-                ->schema(WarehouseDocumentForm::bulkComponents())
+                // Tanpa sticky header/footer: modal sticky menjadi area scroll sendiri dan memotong dropdown di baris bawah tabel
+                ->modalWidth(Width::ThreeExtraLarge)
+                ->steps(WarehouseDocumentForm::bulkSteps())
                 ->action(function (array $data): void {
                     $programs = collect(WarehouseDocumentForm::availablePrograms())->keyBy(fn (array $program): string => (string) $program['id']);
                     $pathsByName = array_flip($data['file_names'] ?? []);

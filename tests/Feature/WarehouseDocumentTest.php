@@ -85,6 +85,27 @@ class WarehouseDocumentTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_bulk_upload_names_files_that_are_not_real_pdfs_and_rejects_them(): void
+    {
+        Queue::fake();
+        $this->fakeArsipPrograms([$this->program('3', 'GDG-BDG-01', 'PO/2026/0103 / SJ-0103')]);
+
+        $this->actingAs($this->scmAdmin());
+
+        Livewire::test(ListWarehouseDocuments::class)
+            ->callAction('bulkUpload', [
+                'files' => [
+                    UploadedFile::fake()->create('PO-2026-0103.pdf', 100, 'application/pdf'),
+                    // Halaman web yang tersimpan dengan akhiran .pdf (hasil unduhan yang gagal)
+                    UploadedFile::fake()->createWithContent('Invoice_INV-2026-000017.pdf', '<!DOCTYPE html><html><head><title>/tmp/files</title></head><body>preview</body></html>'),
+                ],
+            ])
+            ->assertNotified('File bukan PDF/JPG/PNG asli');
+
+        $this->assertSame(0, WarehouseDocument::count());
+        Queue::assertNothingPushed();
+    }
+
     public function test_scm_admin_uploads_many_memos_to_different_warehouses_at_once(): void
     {
         Queue::fake();
@@ -97,13 +118,10 @@ class WarehouseDocumentTest extends TestCase
 
         Livewire::test(ListWarehouseDocuments::class)
             ->callAction('bulkUpload', [
+                // Baris tabel (kode gudang + PO) terisi otomatis dari nama file
                 'files' => [
                     UploadedFile::fake()->create('PO-2026-0103.pdf', 100, 'application/pdf'),
                     UploadedFile::fake()->create('SJ-0102.pdf', 100, 'application/pdf'),
-                ],
-                'items' => [
-                    ['file_key' => 'a', 'file_name' => 'PO-2026-0103.pdf', 'arsip_program_id' => '3'],
-                    ['file_key' => 'b', 'file_name' => 'SJ-0102.pdf', 'arsip_program_id' => '2'],
                 ],
             ])
             ->assertHasNoActionErrors()
@@ -129,15 +147,34 @@ class WarehouseDocumentTest extends TestCase
             'a' => 'livewire-tmp/PO-2026-0103.pdf',
             'b' => 'livewire-tmp/DO 0105 scan.jpg',
             'c' => 'livewire-tmp/IMG_20261011_0832.jpg',
+            'd' => 'livewire-tmp/scan-tanpa-nomor.pdf',
         ], [
             // Pilihan yang sudah diubah pengguna tidak ditimpa
-            'c' => ['file_key' => 'c', 'file_name' => 'IMG_20261011_0832.jpg', 'arsip_program_id' => '3'],
+            'c' => ['file_key' => 'c', 'file_name' => 'IMG_20261011_0832.jpg', 'kode_gudang' => 'GDG-BDG-01', 'arsip_program_id' => '3'],
         ]);
 
-        $this->assertSame('3', $items['a']['arsip_program_id']);
-        $this->assertSame('5', $items['b']['arsip_program_id']);
-        $this->assertSame('3', $items['c']['arsip_program_id']);
+        // PO terbaca dari nama file, kode gudangnya ikut terisi dari PO tersebut
+        $this->assertSame(['GDG-BDG-01', '3'], [$items['a']['kode_gudang'], $items['a']['arsip_program_id']]);
+        $this->assertSame(['GDG-TBN-01', '5'], [$items['b']['kode_gudang'], $items['b']['arsip_program_id']]);
+        $this->assertSame(['GDG-BDG-01', '3'], [$items['c']['kode_gudang'], $items['c']['arsip_program_id']]);
+        // Tidak terbaca: admin memilih gudang dan PO sendiri
+        $this->assertSame([null, null], [$items['d']['kode_gudang'], $items['d']['arsip_program_id']]);
         $this->assertSame('DO 0105 scan.jpg', $items['b']['file_name']);
+    }
+
+    public function test_bulk_upload_rows_of_warehouse_staff_are_locked_to_their_warehouse(): void
+    {
+        $this->fakeArsipPrograms([$this->program('7', 'GTC', '2610000079')]);
+
+        $this->actingAs($this->warehouseStaff('GTC'));
+
+        $items = WarehouseDocumentForm::itemsForFiles([
+            'a' => 'livewire-tmp/2610000079.pdf',
+            'b' => 'livewire-tmp/scan-tanpa-nomor.pdf',
+        ], []);
+
+        $this->assertSame(['GTC', '7'], [$items['a']['kode_gudang'], $items['a']['arsip_program_id']]);
+        $this->assertSame(['GTC', null], [$items['b']['kode_gudang'], $items['b']['arsip_program_id']]);
     }
 
     public function test_scm_admin_picks_a_warehouse_first_then_its_po(): void
@@ -173,6 +210,28 @@ class WarehouseDocumentTest extends TestCase
 
         $this->assertDatabaseHas('warehouse_documents', ['arsip_program_id' => '2', 'kode_gudang' => 'GTC', 'po_sj_number' => '2610000079']);
         Queue::assertPushed(SendWarehouseDocumentToArsipJob::class);
+    }
+
+    public function test_bulk_upload_table_uses_short_labels_and_shows_a_summary(): void
+    {
+        $this->fakeArsipPrograms([
+            ['id' => '7', 'title' => 'PO REALME WEST JAVA PROGRAM PROMOTION C100X', 'po_sj_number' => '2610000079', 'kode_gudang' => 'GTC', 'has_memo' => true],
+        ]);
+
+        $this->actingAs($this->scmAdmin());
+
+        // Kode gudang saja; judul PO tetap utuh dengan penanda Memo yang singkat
+        $this->assertSame(['GTC' => 'GTC'], WarehouseDocumentForm::warehouseOptions(compact: true));
+        $this->assertSame(['7' => '2610000079 — PO REALME WEST JAVA PROGRAM PROMOTION C100X (ada Memo)'], WarehouseDocumentForm::programOptions('GTC', compact: true));
+
+        $this->assertSame('3 file · 2 sudah ada PO tujuan · 1 perlu dipilih', WarehouseDocumentForm::bulkSummary([
+            ['kode_gudang' => 'GTC', 'arsip_program_id' => '7'],
+            ['kode_gudang' => 'GTC', 'arsip_program_id' => '7'],
+            ['kode_gudang' => null, 'arsip_program_id' => null],
+        ]));
+        $this->assertSame('1 file · semua sudah ada PO tujuan', WarehouseDocumentForm::bulkSummary([
+            ['kode_gudang' => 'GTC', 'arsip_program_id' => '7'],
+        ]));
     }
 
     public function test_warehouse_staff_only_sees_documents_of_their_own_warehouse(): void

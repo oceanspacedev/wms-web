@@ -10,10 +10,15 @@ use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\TextSize;
+use finfo;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -22,6 +27,11 @@ use Throwable;
 class WarehouseDocumentForm
 {
     /**
+     * Jenis isi file yang diterima (dicek dari isi file, bukan dari akhiran nama file).
+     */
+    public const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+
+    /**
      * Form upload satu Memo/DO.
      */
     public static function configure(Schema $schema): Schema
@@ -29,25 +39,13 @@ class WarehouseDocumentForm
         return $schema
             ->columns(1)
             ->components([
-                Select::make('kode_gudang')
+                static::warehouseSelect()
                     ->label('Kode Gudang')
-                    ->options(fn (): array => static::warehouseOptions())
-                    // Petugas gudang terkunci ke gudangnya sendiri; admin/staf SCM bisa memilih semua gudang
                     ->default(fn (): ?string => static::currentUser()?->isWarehouseStaff() ? static::currentUser()->kode_gudang_arsip : null)
-                    ->disabled(fn (): bool => (bool) static::currentUser()?->isWarehouseStaff())
-                    ->searchable()
-                    ->required()
-                    ->live()
-                    ->afterStateUpdated(fn (Set $set) => $set('arsip_program_id', null))
                     ->helperText('Pilih gudang dulu; daftar No. PO/SJ menyesuaikan.'),
 
-                Select::make('arsip_program_id')
+                static::programSelect('arsip_program_id')
                     ->label('No. PO/SJ')
-                    ->options(fn (Get $get): array => static::programOptions($get('kode_gudang')))
-                    ->disabled(fn (Get $get): bool => blank($get('kode_gudang')))
-                    ->placeholder(fn (Get $get): string => blank($get('kode_gudang')) ? 'Pilih kode gudang dulu' : 'Pilih PO')
-                    ->searchable()
-                    ->required()
                     ->helperText('Yang belum punya Memo/DO tampil paling atas.'),
 
                 static::fileUpload('file_path')
@@ -57,41 +55,118 @@ class WarehouseDocumentForm
     }
 
     /**
-     * Form upload banyak Memo/DO sekaligus; PO tujuan tiap file ditebak dari nama filenya.
+     * Upload banyak Memo/DO dalam dua langkah: pilih file, lalu cek gudang & PO tujuan tiap file.
+     * PO (dan kode gudangnya) ditebak dari nama file.
      *
-     * @return array<int, mixed>
+     * @return array<int, Step>
      */
-    public static function bulkComponents(): array
+    public static function bulkSteps(): array
     {
         return [
-            static::fileUpload('files')
-                ->label('File Memo/DO')
-                ->multiple()
-                ->maxFiles(30)
-                ->storeFileNamesIn('file_names')
-                ->live()
-                ->afterStateUpdated(fn (?array $state, Get $get, Set $set) => $set('items', static::itemsForFiles($state ?? [], $get('items') ?? [])))
-                ->helperText('Maksimal 30 file (PDF, JPG, PNG; masing-masing 15 MB). Beri nama file dengan nomor PO/SJ, misal PO-2026-0103.pdf, agar PO terisi otomatis.'),
-
-            Repeater::make('items')
-                ->label('PO tujuan tiap file')
-                ->table([
-                    TableColumn::make('File'),
-                    TableColumn::make('PO tujuan')->markAsRequired(),
-                ])
+            Step::make('Pilih file')
                 ->schema([
-                    Hidden::make('file_key'),
-                    TextInput::make('file_name')
-                        ->disabled()
-                        ->dehydrated(),
-                    static::programSelect('arsip_program_id')
-                        ->placeholder('Pilih PO'),
-                ])
-                ->addable(false)
-                ->deletable(false)
-                ->reorderable(false)
-                ->visible(fn (Get $get): bool => filled($get('files'))),
+                    static::fileUpload('files')
+                        ->hiddenLabel()
+                        ->multiple()
+                        ->maxFiles(30)
+                        // Daftar satu baris tipis per file (nama, ukuran, hapus); layout grid membuat kotak besar kosong untuk PDF
+                        ->previewable(false)
+                        ->storeFileNamesIn('file_names')
+                        ->live()
+                        ->afterStateUpdated(function (?array $state, Get $get, Set $set): void {
+                            static::warnAboutInvalidFiles($state ?? [], $get('items') ?? []);
+                            $set('items', static::itemsForFiles($state ?? [], $get('items') ?? []));
+                        })
+                        ->helperText('Maks. 30 file PDF/JPG/PNG (≤ 15 MB). Nama file = No. PO, misal 2610000077.pdf, agar terisi otomatis.'),
+                ]),
+
+            Step::make('Cek PO tujuan')
+                ->schema([
+                    Text::make(fn (Get $get): string => static::bulkSummary($get('items') ?? [])),
+
+                    Repeater::make('items')
+                        ->hiddenLabel()
+                        ->table([
+                            TableColumn::make('File')->width('30%'),
+                            TableColumn::make('Kode Gudang')->markAsRequired()->width('22%'),
+                            TableColumn::make('PO tujuan')->markAsRequired(),
+                        ])
+                        ->compact()
+                        ->schema([
+                            Hidden::make('file_key'),
+                            Hidden::make('file_name'),
+                            // Nama file ditampilkan utuh dengan huruf kecil (boleh turun baris), bukan input yang terpotong
+                            TextEntry::make('file_label')
+                                ->hiddenLabel()
+                                ->size(TextSize::Small)
+                                ->state(fn (Get $get): ?string => $get('file_name')),
+                            static::warehouseSelect(compact: true)
+                                ->placeholder('Pilih gudang'),
+                            static::programSelect('arsip_program_id', compact: true),
+                        ])
+                        ->addable(false)
+                        ->deletable(false)
+                        ->reorderable(false),
+                ]),
         ];
+    }
+
+    /**
+     * Sebut langsung file baru yang isinya bukan PDF/JPG/PNG (misal halaman web yang tersimpan sebagai .pdf),
+     * karena pesan validasi untuk banyak file tidak menyebut nama file yang bermasalah.
+     *
+     * @param  array<string, TemporaryUploadedFile|string>  $files
+     * @param  array<string, array<string, mixed>>  $currentItems
+     */
+    public static function warnAboutInvalidFiles(array $files, array $currentItems): void
+    {
+        $knownKeys = collect($currentItems)->pluck('file_key')->map(fn ($key): string => (string) $key)->all();
+
+        $invalidNames = collect($files)
+            ->filter(fn ($file, $key): bool => $file instanceof TemporaryUploadedFile && ! in_array((string) $key, $knownKeys, true))
+            ->reject(fn (TemporaryUploadedFile $file): bool => in_array(static::detectMimeType($file), self::ACCEPTED_TYPES, true))
+            ->map(fn (TemporaryUploadedFile $file): string => $file->getClientOriginalName())
+            ->values();
+
+        if ($invalidNames->isEmpty()) {
+            return;
+        }
+
+        Notification::make()
+            ->title('File bukan PDF/JPG/PNG asli')
+            ->body($invalidNames->implode(', ').'. Isinya bukan PDF/gambar (misal halaman web yang tersimpan sebagai .pdf). Hapus dari daftar lalu unduh ulang file aslinya.')
+            ->danger()
+            ->persistent()
+            ->send();
+    }
+
+    /**
+     * Jenis file menurut isinya (misal "text/html" untuk halaman web berakhiran .pdf).
+     */
+    private static function detectMimeType(TemporaryUploadedFile $file): ?string
+    {
+        $path = $file->getRealPath();
+
+        if (is_string($path) && is_file($path)) {
+            return (new finfo(FILEINFO_MIME_TYPE))->file($path) ?: null;
+        }
+
+        return $file->getMimeType();
+    }
+
+    /**
+     * Ringkasan di atas tabel cek, misal "6 file · 4 sudah ada PO tujuan · 2 perlu dipilih".
+     *
+     * @param  array<string, array<string, mixed>>  $items
+     */
+    public static function bulkSummary(array $items): string
+    {
+        $total = count($items);
+        $ready = collect($items)->filter(fn (array $item): bool => filled($item['kode_gudang'] ?? null) && filled($item['arsip_program_id'] ?? null))->count();
+
+        return $total === $ready
+            ? "{$total} file · semua sudah ada PO tujuan"
+            : "{$total} file · {$ready} sudah ada PO tujuan · ".($total - $ready).' perlu dipilih';
     }
 
     /**
@@ -107,13 +182,19 @@ class WarehouseDocumentForm
         $current = collect($currentItems)->keyBy('file_key');
         $items = [];
 
+        $ownWarehouse = static::currentUser()?->isWarehouseStaff() ? static::currentUser()->kode_gudang_arsip : null;
+
         foreach ($files as $key => $file) {
             $fileName = $file instanceof TemporaryUploadedFile ? $file->getClientOriginalName() : basename((string) $file);
+            $programId = MemoFileMatcher::guess($fileName, $programs);
+            $program = collect($programs)->first(fn (array $program): bool => (string) $program['id'] === $programId);
 
             $items[(string) $key] = $current->get((string) $key) ?? [
                 'file_key' => (string) $key,
                 'file_name' => $fileName,
-                'arsip_program_id' => MemoFileMatcher::guess($fileName, $programs),
+                // Jika PO terbaca dari nama file, kode gudangnya ikut terisi dari PO tersebut
+                'kode_gudang' => $program['kode_gudang'] ?? $ownWarehouse,
+                'arsip_program_id' => $programId,
             ];
         }
 
@@ -146,12 +227,12 @@ class WarehouseDocumentForm
      *
      * @return array<string, string>
      */
-    public static function warehouseOptions(): array
+    public static function warehouseOptions(bool $compact = false): array
     {
         return collect(static::availablePrograms())
             ->groupBy('kode_gudang')
             ->sortKeys()
-            ->map(fn ($programs, string $kodeGudang): string => sprintf(
+            ->map(fn ($programs, string $kodeGudang): string => $compact ? $kodeGudang : sprintf(
                 '%s — %d PO, %d belum ada Memo/DO',
                 $kodeGudang,
                 $programs->count(),
@@ -165,7 +246,7 @@ class WarehouseDocumentForm
      *
      * @return array<string, string>
      */
-    public static function programOptions(?string $kodeGudang = null): array
+    public static function programOptions(?string $kodeGudang = null, bool $compact = false): array
     {
         $kodeGudang = mb_strtolower(trim((string) $kodeGudang));
 
@@ -176,7 +257,8 @@ class WarehouseDocumentForm
             ->mapWithKeys(fn (array $program): array => [
                 (string) $program['id'] => ($kodeGudang === '' ? $program['kode_gudang'].' · ' : '')
                     .($program['po_sj_number'] ?: $program['id']).' — '.$program['title']
-                    .(! empty($program['has_memo']) ? ' (sudah ada Memo/DO)' : ''),
+                    // Versi ringkas (tabel upload banyak) memakai penanda yang lebih pendek
+                    .(! empty($program['has_memo']) ? ($compact ? ' (ada Memo)' : ' (sudah ada Memo/DO)') : ''),
             ])
             ->all();
     }
@@ -208,11 +290,35 @@ class WarehouseDocumentForm
         return $programs;
     }
 
-    private static function programSelect(string $name): Select
+    /**
+     * Pilihan kode gudang; petugas gudang terkunci ke gudangnya sendiri, admin/staf SCM bisa memilih semua gudang.
+     */
+    private static function warehouseSelect(bool $compact = false): Select
+    {
+        return Select::make('kode_gudang')
+            ->options(fn (): array => static::warehouseOptions($compact))
+            ->disabled(fn (): bool => (bool) static::currentUser()?->isWarehouseStaff())
+            ->searchable()
+            // Teks pendek agar muat di kolom tabel yang sempit
+            ->searchPrompt('Cari kode…')
+            ->noSearchResultsMessage('Tidak ditemukan')
+            ->required()
+            ->live()
+            ->afterStateUpdated(fn (Set $set) => $set('arsip_program_id', null));
+    }
+
+    /**
+     * Pilihan PO, hanya untuk kode gudang yang dipilih di samping/di atasnya.
+     */
+    private static function programSelect(string $name, bool $compact = false): Select
     {
         return Select::make($name)
-            ->options(fn (): array => static::programOptions())
+            ->options(fn (Get $get): array => static::programOptions($get('kode_gudang'), $compact))
+            ->disabled(fn (Get $get): bool => blank($get('kode_gudang')))
+            ->placeholder(fn (Get $get): string => blank($get('kode_gudang')) ? 'Pilih kode gudang dulu' : 'Pilih PO')
             ->searchable()
+            ->searchPrompt('Cari No. PO atau judul…')
+            ->noSearchResultsMessage('PO tidak ditemukan')
             ->required();
     }
 
@@ -229,8 +335,12 @@ class WarehouseDocumentForm
             ->label('File Memo/DO')
             ->disk('local')
             ->directory('warehouse_documents')
-            ->acceptedFileTypes(['application/pdf', 'image/jpeg', 'image/png'])
+            ->acceptedFileTypes(self::ACCEPTED_TYPES)
             ->maxSize(15360)
+            ->validationMessages([
+                'mimetypes' => 'Ada file yang isinya bukan PDF, JPG, atau PNG asli (misal halaman web yang tersimpan sebagai .pdf). Hapus file tersebut lalu coba lagi.',
+                'max' => 'Ukuran file maksimal 15 MB.',
+            ])
             ->required();
     }
 }
