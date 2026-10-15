@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\ExpeditionRateCard;
 use Exception;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -256,76 +255,6 @@ class FreightRateGoogleSheetService
             'total_imported' => $importedCount,
             'message' => "Berhasil menyinkronkan {$importedCount} data tarif ekspedisi dari Google Spreadsheet.",
         ];
-    }
-
-    /**
-     * Synchronize SQLite cache directly from ExpeditionRateCard master data.
-     *
-     * @return int Total synced records
-     */
-    public function syncFromRateCards(): int
-    {
-        $rateCards = ExpeditionRateCard::with('expedition')->where('is_active', true)->get();
-        if ($rateCards->isEmpty()) {
-            return 0;
-        }
-
-        $db = $this->getDb();
-        $db->exec('PRAGMA synchronous = OFF');
-        $db->beginTransaction();
-
-        $db->exec('DELETE FROM rates');
-
-        $stmt = $db->prepare('
-            INSERT INTO rates (
-                expedition, origin, province, destination_city, destination_district,
-                min_kg, min_kg_val, is_flat, rate_per_kg, lead_time, service, code, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ');
-
-        $count = 0;
-        foreach ($rateCards as $rc) {
-            $exp = $rc->expedition?->name ?: 'UMUM';
-            $orig = strtoupper(trim($rc->origin_depo));
-            $dest = strtoupper(trim($rc->destination_city));
-            $dist = ! empty($rc->destination_district) ? strtoupper(trim($rc->destination_district)) : '';
-            $prov = ! empty($rc->province) ? strtoupper(trim($rc->province)) : '';
-            $minKgVal = (float) $rc->min_kg;
-            $isFlat = $minKgVal == 0 ? 1 : 0;
-            $ratePerKg = (float) $rc->rate_per_kg;
-            $leadTime = ! empty($rc->sla_days) ? $rc->sla_days.' HARI' : '';
-            $service = strtoupper(trim($rc->service_type ?: 'DARAT'));
-            $notes = $rc->notes ?: '';
-
-            $stmt->execute([
-                $exp,
-                $orig,
-                $prov,
-                $dest,
-                $dist,
-                $minKgVal > 0 ? (string) round($minKgVal).' KG' : 'FLAT',
-                $minKgVal,
-                $isFlat,
-                $ratePerKg,
-                $leadTime,
-                $service,
-                '',
-                $notes,
-            ]);
-
-            $count++;
-        }
-
-        $metaStmt = $db->prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
-        $metaStmt->execute(['synced_at', now()->toDateTimeString()]);
-        $metaStmt->execute(['total_rows', (string) $count]);
-
-        $db->commit();
-        $db->exec('PRAGMA synchronous = NORMAL');
-
-        Log::info("Synced {$count} freight rates from ExpeditionRateCard master data to SQLite cache.");
-
-        return $count;
     }
 
     /**

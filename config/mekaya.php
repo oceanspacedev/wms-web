@@ -19,9 +19,4 @@ return [
         'favicon' => null,
     ],
 
-    'settings' => [
-        'name' => env('APP_NAME', 'WMS'),
-        'email' => env('MAIL_FROM_ADDRESS', 'admin@admin.com'),
-    ],
-
 ];

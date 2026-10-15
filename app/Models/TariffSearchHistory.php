@@ -6,7 +6,6 @@ use App\Services\FreightRateGoogleSheetService;
 use Database\Factories\TariffSearchHistoryFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TariffSearchHistory extends Model
 {
@@ -46,14 +45,6 @@ class TariffSearchHistory extends Model
             'total_results' => 'integer',
             'rates_summary' => 'array',
         ];
-    }
-
-    /**
-     * @return BelongsTo<User, $this>
-     */
-    public function user(): BelongsTo
-    {
-        return $this->belongsTo(User::class);
     }
 
     /**

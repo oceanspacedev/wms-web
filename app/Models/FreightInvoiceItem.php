@@ -57,12 +57,4 @@ class FreightInvoiceItem extends Model
     {
         return $this->belongsTo(FreightInvoice::class, 'freight_invoice_id');
     }
-
-    /**
-     * @return BelongsTo<CsaShipment, $this>
-     */
-    public function shipment(): BelongsTo
-    {
-        return $this->belongsTo(CsaShipment::class, 'csa_shipment_id');
-    }
 }

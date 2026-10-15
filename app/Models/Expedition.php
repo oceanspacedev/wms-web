@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Expedition extends Model
 {
@@ -29,20 +28,4 @@ class Expedition extends Model
     protected $casts = [
         'is_active' => 'boolean',
     ];
-
-    /**
-     * @return HasMany<ExpeditionRateCard, $this>
-     */
-    public function rateCards(): HasMany
-    {
-        return $this->hasMany(ExpeditionRateCard::class);
-    }
-
-    /**
-     * @return HasMany<FreightInvoice, $this>
-     */
-    public function invoices(): HasMany
-    {
-        return $this->hasMany(FreightInvoice::class);
-    }
 }

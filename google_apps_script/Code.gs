@@ -74,8 +74,7 @@ function doPost(e) {
 
     // Fallback jika script berjalan mandiri atau butuh target eksplisit
     if (!ss) {
-      var fallbackId = payload.spreadsheetId || "1oBtqSEj0IZKzZAMQKquuyve242uKPEzShn4-uI92cCE";
-      ss = SpreadsheetApp.openById(fallbackId);
+      ss = SpreadsheetApp.openById("1oBtqSEj0IZKzZAMQKquuyve242uKPEzShn4-uI92cCE");
     }
 
     // Cari tab sheet yang SUDAH ADA di spreadsheet (case-insensitive & trim)
@@ -372,72 +371,4 @@ function deleteUnwantedSheets() {
   }
 
   Logger.log("Selesai! Berhasil membersihkan " + deletedCount + " sheet asing.");
-}
-
-/**
- * PEMBERSIHAN SEKALI PAKAI (09/10/2026):
- * Menghapus baris setengah jadi peninggalan batch yang gagal karena validasi dropdown (kolom P)
- * pada sinkron pertama. Setiap baris dicocokkan dulu dengan daftar Nomor SJ di bawah; jika ada
- * SATU saja yang tidak cocok, tab tersebut TIDAK dihapus sama sekali (aman dijalankan ulang).
- *
- * Cara pakai: di editor Apps Script pilih fungsi 'hapusBarisGagalSinkron' lalu klik 'Run' (Jalankan),
- * kemudian lihat hasilnya di 'Execution log' (Log eksekusi).
- */
-function hapusBarisGagalSinkron() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss) {
-    ss = SpreadsheetApp.openById("1oBtqSEj0IZKzZAMQKquuyve242uKPEzShn4-uI92cCE");
-  }
-
-  var targets = [
-    {
-      sheet: "SURABAYA",
-      startRow: 3434,
-      sj: ("2609001644,2609001668,2609002327,2609005943,2609005970,2609014618,2609014619,2609014621,2609014622," +
-        "2609014623,2609014624,2609014628,2609014653,2609014656,2609014658,2609014691,2609014705,2609014720," +
-        "2609014728,2609014735,2609014752,2609015107,2609017657,2609017660,2609017669,2609017673,2609017953," +
-        "2609017971,2609018028,2609018032,2609018072,2609018078,2609018132,2609018134,2609018144,2609018145").split(",")
-    },
-    {
-      sheet: "JAKARTA PIK",
-      startRow: 13989,
-      sj: ("2609000003,2609000103,2609000205,2609000412,2609000413,2609000414,2609000517,2609000518,2609000519," +
-        "2609000706,2609000888,2609000989,2609001089,2609001189,2609001368,2609001547,2609001548,2609001709," +
-        "2609001809,2609001909,2609002009,2609002010,2609002163,2609002266,2609002454,2609002575,2609002677," +
-        "2609002779,2609002933,2609003130,2609003283,2609003383,2609003483,2609003663,2609003843,2609003953," +
-        "2609004053,2609004153,2609004253,2609004353,2609004455,2609004558,2609004756,2609004988,2609004989," +
-        "2609005203,2609005204,2609005205,2609005303,2609005403,2609005573,2609005706,2609005707,2609005708," +
-        "2609005709,2609005710,2609005876,2609006036,2609006138,2609006239,2609006341,2609006441,2609006542," +
-        "2609006644,2609006745,2609006850,2609006951,2609007052,2609007154,2609007260,2609007364,2609007526," +
-        "2609007641,2609007747,2609007854,2609007965,2609007966,2609007967").split(",")
-    }
-  ];
-
-  for (var t = 0; t < targets.length; t++) {
-    var target = targets[t];
-    var sheet = ss.getSheetByName(target.sheet);
-    if (!sheet) {
-      Logger.log(target.sheet + ": tab tidak ditemukan, dilewati.");
-      continue;
-    }
-
-    var count = target.sj.length;
-    var values = sheet.getRange(target.startRow, 9, count, 1).getValues();
-    var mismatch = [];
-    for (var i = 0; i < count; i++) {
-      if (String(values[i][0]).trim() !== target.sj[i]) {
-        mismatch.push("baris " + (target.startRow + i) + " berisi '" + values[i][0] + "', seharusnya " + target.sj[i]);
-      }
-    }
-
-    if (mismatch.length) {
-      Logger.log(target.sheet + ": DIBATALKAN, tidak ada yang dihapus. " + mismatch.length +
-        " baris tidak cocok, contoh: " + mismatch.slice(0, 3).join("; "));
-      continue;
-    }
-
-    sheet.deleteRows(target.startRow, count);
-    Logger.log(target.sheet + ": " + count + " baris (" + target.startRow + "-" + (target.startRow + count - 1) +
-      ") berhasil dihapus.");
-  }
 }
