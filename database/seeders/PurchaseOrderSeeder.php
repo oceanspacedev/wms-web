@@ -15,8 +15,8 @@ class PurchaseOrderSeeder extends Seeder
         $orders = [
             [
                 'no_po' => 'PO-202609-0012',
-                'no_sj_supplier' => 'SJ-MKM-8821',
-                'tanggal_po' => '2026-09-01',
+                'no_do' => 'SJ-MKM-8821',
+                'tanggal_do' => '2026-09-01',
                 'tanggal_datang' => '2026-09-03',
                 'nama_supplier' => 'PT Sumber Makmur Pratama',
                 'nama_gudang' => 'GUDANG MSIS BANDUNG',
@@ -37,8 +37,8 @@ class PurchaseOrderSeeder extends Seeder
             ],
             [
                 'no_po' => 'PO-202609-0025',
-                'no_sj_supplier' => 'SJ-ELK-4412',
-                'tanggal_po' => '2026-09-05',
+                'no_do' => 'SJ-ELK-4412',
+                'tanggal_do' => '2026-09-05',
                 'tanggal_datang' => '2026-09-08',
                 'nama_supplier' => 'PT Citra Elektronik Nusantara',
                 'nama_gudang' => 'GUDANG MSIS CIREBON',
@@ -59,8 +59,8 @@ class PurchaseOrderSeeder extends Seeder
             ],
             [
                 'no_po' => 'PO-202609-0041',
-                'no_sj_supplier' => 'SJ-DIST-9901',
-                'tanggal_po' => '2026-09-10',
+                'no_do' => 'SJ-DIST-9901',
+                'tanggal_do' => '2026-09-10',
                 'tanggal_datang' => '2026-09-14',
                 'nama_supplier' => 'PT Mitra Distribusi Mandiri',
                 'nama_gudang' => 'GUDANG MSIS JAKARTA PIK',

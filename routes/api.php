@@ -33,13 +33,13 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::get('/tracking-orders', [TrackingOrderApiController::class, 'index'])->name('tracking-orders.index');
     Route::post('/tracking-orders', [TrackingOrderApiController::class, 'store'])->name('tracking-orders.store');
-    Route::get('/tracking-orders/by-sj/{no_sj}', [TrackingOrderApiController::class, 'findByNoSj'])->name('tracking-orders.by-sj');
+    // Document numbers may contain slashes (SJ/MKM/0042), so the lookup segment takes the rest of the path.
+    Route::get('/tracking-orders/by-sj/{no_sj}', [TrackingOrderApiController::class, 'findByNoSj'])->where('no_sj', '.+')->name('tracking-orders.by-sj');
     Route::get('/tracking-orders/{trackingOrder}', [TrackingOrderApiController::class, 'show'])->name('tracking-orders.show');
-    Route::post('/tracking-orders/{trackingOrder}/submit-pod', [TrackingOrderApiController::class, 'submitPod'])->name('tracking-orders.submit-pod');
-    Route::post('/tracking-orders/by-sj/{no_sj}/submit-pod', [TrackingOrderApiController::class, 'submitPodBySj'])->name('tracking-orders.submit-pod-by-sj');
 
     Route::get('/purchase-orders', [PurchaseOrderApiController::class, 'index'])->name('purchase-orders.index');
     Route::post('/purchase-orders', [PurchaseOrderApiController::class, 'store'])->name('purchase-orders.store');
-    Route::get('/purchase-orders/by-po/{noPo}', [PurchaseOrderApiController::class, 'findByNoPo'])->name('purchase-orders.by-po');
-    Route::get('/purchase-orders/by-sj/{noSj}', [PurchaseOrderApiController::class, 'findBySupplierSj'])->name('purchase-orders.by-sj');
+    Route::get('/purchase-orders/{purchaseOrder}', [PurchaseOrderApiController::class, 'show'])->whereNumber('purchaseOrder')->name('purchase-orders.show');
+    Route::get('/purchase-orders/by-po/{noPo}', [PurchaseOrderApiController::class, 'findByNoPo'])->where('noPo', '.+')->name('purchase-orders.by-po');
+    Route::get('/purchase-orders/by-do/{noDo}', [PurchaseOrderApiController::class, 'findByNoDo'])->where('noDo', '.+')->name('purchase-orders.by-do');
 });

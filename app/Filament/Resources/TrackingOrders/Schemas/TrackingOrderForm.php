@@ -113,6 +113,13 @@ class TrackingOrderForm
                                     ->openable()
                                     ->downloadable(),
                             ]),
+
+                        Textarea::make('notes')
+                            ->label('Catatan Kurir')
+                            ->rows(2)
+                            ->maxLength(1000)
+                            ->columnSpanFull()
+                            ->placeholder('Contoh: 4 koli, diterima lengkap'),
                     ]),
             ]);
     }

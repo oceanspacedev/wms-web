@@ -51,8 +51,6 @@ class TrackingOrderResource extends JsonResource
             'latitude' => $this->latitude !== null ? (float) $this->latitude : null,
             /** Koordinat longitude serah terima. @var float|null */
             'longitude' => $this->longitude !== null ? (float) $this->longitude : null,
-            /** PENDING, IN_TRANSIT, DELIVERED, atau RETURNED. @var string */
-            'status' => $this->status,
             /** Catatan kurir. @var string|null */
             'notes' => $this->notes,
             /** Waktu dibuat (ISO 8601). @var string|null */

@@ -32,7 +32,6 @@ class TrackingOrderTest extends TestCase
             'nama_dealer' => 'PT BCA',
             'nama_pengirim' => 'Heidy',
             'nama_penerima' => 'Imas',
-            'status' => 'DELIVERED',
         ]);
 
         $order = TrackingOrder::where('no_sj', '2401304519')->firstOrFail();

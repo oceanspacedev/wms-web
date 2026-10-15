@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TrackingOrder extends Model
 {
@@ -29,8 +28,6 @@ class TrackingOrder extends Model
         'address',
         'latitude',
         'longitude',
-        'status',
-        'csa_shipment_id',
         'notes',
     ];
 
@@ -48,13 +45,5 @@ class TrackingOrder extends Model
             'latitude' => 'float',
             'longitude' => 'float',
         ];
-    }
-
-    /**
-     * Get the associated CSA shipment.
-     */
-    public function csaShipment(): BelongsTo
-    {
-        return $this->belongsTo(CsaShipment::class, 'csa_shipment_id');
     }
 }

@@ -158,7 +158,7 @@ class FreightRateGoogleSheetService
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) WHMS-TariffSync/1.0');
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) WMS-TariffSync/1.0');
         curl_setopt($ch, CURLOPT_TIMEOUT, 90);
 
         $fp = fopen($tempCsv, 'w+');

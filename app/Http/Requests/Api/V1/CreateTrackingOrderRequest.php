@@ -30,14 +30,13 @@ class CreateTrackingOrderRequest extends FormRequest
             'tanggal_nota' => ['nullable', 'date'],
             'tanggal_pengiriman' => ['nullable', 'date'],
             'nama_pengirim' => ['nullable', 'string', 'max:255'],
-            'nama_penerima' => ['nullable', 'string', 'max:255'],
+            'nama_penerima' => ['required', 'string', 'max:255'],
             'address' => ['nullable', 'string', 'max:1000'],
             'latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'longitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'status' => ['nullable', 'string', 'in:PENDING,IN_TRANSIT,DELIVERED,RETURNED'],
             'notes' => ['nullable', 'string', 'max:1000'],
-            'foto_nota_sj' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp,heic', 'max:12288'],
-            'foto_penerima' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp,heic', 'max:12288'],
+            'foto_nota_sj' => ['required', 'image', 'mimes:jpeg,png,jpg,webp,heic', 'max:12288'],
+            'foto_penerima' => ['required', 'image', 'mimes:jpeg,png,jpg,webp,heic', 'max:12288'],
         ];
     }
 
@@ -52,6 +51,9 @@ class CreateTrackingOrderRequest extends FormRequest
             'no_sj.required' => 'Nomor Surat Jalan wajib diisi.',
             'no_sj.unique' => 'Nomor Surat Jalan sudah terdaftar di sistem.',
             'nama_dealer.required' => 'Nama dealer / toko tujuan wajib diisi.',
+            'nama_penerima.required' => 'Nama penerima wajib diisi.',
+            'foto_nota_sj.required' => 'Foto nota surat jalan wajib diunggah.',
+            'foto_penerima.required' => 'Foto penerima wajib diunggah.',
             'jumlah_value_nota.numeric' => 'Nilai nota harus berupa nominal angka valid.',
             'latitude.numeric' => 'Latitude harus berupa angka koordinat valid.',
             'latitude.between' => 'Latitude harus berada dalam rentang -90 hingga 90 derajat.',

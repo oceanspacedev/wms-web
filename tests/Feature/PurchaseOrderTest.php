@@ -29,7 +29,7 @@ class PurchaseOrderTest extends TestCase
 
         $this->assertDatabaseHas('purchase_orders', [
             'no_po' => 'PO-202609-0012',
-            'no_sj_supplier' => 'SJ-MKM-8821',
+            'no_do' => 'SJ-MKM-8821',
             'nama_supplier' => 'PT Sumber Makmur Pratama',
             'status_penerimaan' => 'Lengkap',
             'status_verifikasi_finance' => 'Disetujui',

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
 /**
- * Memo/DO yang diunggah petugas gudang di WHMS untuk diteruskan ke SCM Arsip.
+ * Memo/DO yang diunggah petugas gudang di WMS untuk diteruskan ke SCM Arsip.
  */
 class WarehouseDocument extends Model
 {

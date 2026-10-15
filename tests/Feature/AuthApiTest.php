@@ -114,7 +114,6 @@ class AuthApiTest extends TestCase
         TrackingOrder::query()->create([
             'no_sj' => 'SJ-API-LOGIN-1',
             'nama_dealer' => 'Dealer Uji',
-            'status' => 'PENDING',
         ]);
 
         $this->withToken($token)
@@ -172,7 +171,7 @@ class AuthApiTest extends TestCase
 
         $order = PurchaseOrder::factory()->create([
             'no_po' => 'PO-202610-0001',
-            'no_sj_supplier' => 'SJ-SUP-0001',
+            'no_do' => 'DO-SUP-0001',
         ]);
 
         $this->getJson('/api/purchase-orders/by-po/PO-202610-0001')
@@ -184,9 +183,9 @@ class AuthApiTest extends TestCase
             ->assertJsonPath('data.no_po', $order->no_po);
 
         $this->withToken($token)
-            ->getJson('/api/purchase-orders/by-sj/SJ-SUP-0001')
+            ->getJson('/api/purchase-orders/by-do/DO-SUP-0001')
             ->assertOk()
-            ->assertJsonPath('data.no_sj_supplier', 'SJ-SUP-0001');
+            ->assertJsonPath('data.no_do', 'DO-SUP-0001');
     }
 
     /**

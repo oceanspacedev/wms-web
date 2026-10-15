@@ -22,10 +22,12 @@ class PurchaseOrderInfolist
                                 TextEntry::make('no_po')
                                     ->label('Nomor PO')
                                     ->weight('bold')
-                                    ->copyable(),
+                                    ->copyable()
+                                    ->placeholder('Belum dicocokkan purchasing'),
 
-                                TextEntry::make('no_sj_supplier')
-                                    ->label('No. SJ Supplier')
+                                TextEntry::make('no_do')
+                                    ->label('No. DO')
+                                    ->copyable()
                                     ->placeholder('-'),
                             ]),
 
@@ -35,8 +37,8 @@ class PurchaseOrderInfolist
                                     ->label('Nama Supplier')
                                     ->placeholder('-'),
 
-                                TextEntry::make('tanggal_po')
-                                    ->label('Tanggal PO')
+                                TextEntry::make('tanggal_do')
+                                    ->label('Tanggal DO')
                                     ->date('d/m/Y')
                                     ->placeholder('-'),
                             ]),
@@ -81,6 +83,16 @@ class PurchaseOrderInfolist
                                     ->placeholder('-'),
                             ]),
 
+                        TextEntry::make('status_penerimaan')
+                            ->label('Status Penerimaan')
+                            ->badge()
+                            ->color(fn (?string $state): string => match ($state) {
+                                'Lengkap' => 'success',
+                                'Kurang' => 'warning',
+                                'Rusak' => 'danger',
+                                default => 'gray',
+                            }),
+
                         Grid::make(2)
                             ->schema([
                                 TextEntry::make('nama_kurir_ekspedisi')
@@ -108,10 +120,28 @@ class PurchaseOrderInfolist
                             ->placeholder('-')
                             ->columnSpanFull(),
 
-                        ImageEntry::make('bukti_serah_terima')
-                            ->label('Foto Bukti Serah Terima / DO Fisik')
-                            ->placeholder('Tidak ada lampiran')
+                        TextEntry::make('address')
+                            ->label('Lokasi Penerimaan')
+                            ->placeholder('-')
                             ->columnSpanFull(),
+
+                        Grid::make(3)
+                            ->schema([
+                                ImageEntry::make('foto_do')
+                                    ->label('Foto DO')
+                                    ->disk('public')
+                                    ->placeholder('Tidak ada lampiran'),
+
+                                ImageEntry::make('foto_resi')
+                                    ->label('Foto Resi')
+                                    ->disk('public')
+                                    ->placeholder('Tidak ada resi'),
+
+                                ImageEntry::make('foto_penerimaan')
+                                    ->label('Foto Penerimaan')
+                                    ->disk('public')
+                                    ->placeholder('Tidak ada lampiran'),
+                            ]),
                     ]),
             ]);
     }

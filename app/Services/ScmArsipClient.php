@@ -9,7 +9,8 @@ use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 /**
- * Klien HTTP ke endpoint integrasi WHMS di SCM Arsip (/api/integrations/whms).
+ * Klien HTTP ke endpoint integrasi WMS di SCM Arsip. Path `/api/integrations/whms` dan
+ * field `whms_document_id` adalah kontrak milik SCM Arsip, jadi namanya tetap.
  */
 class ScmArsipClient
 {
@@ -52,7 +53,7 @@ class ScmArsipClient
         $stream = Storage::disk('local')->readStream($document->file_path);
 
         if ($stream === null) {
-            throw new RuntimeException("File {$document->file_path} tidak ditemukan di WHMS.");
+            throw new RuntimeException("File {$document->file_path} tidak ditemukan di WMS.");
         }
 
         return $this->request()

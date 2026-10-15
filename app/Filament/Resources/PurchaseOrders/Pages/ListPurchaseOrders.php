@@ -13,7 +13,9 @@ class ListPurchaseOrders extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            CreateAction::make(),
+            // The warehouse receives the goods of a PO; it never creates the PO itself.
+            CreateAction::make()
+                ->label('Catat Penerimaan PO'),
         ];
     }
 }

@@ -45,7 +45,6 @@ class TrackingOrderApiTest extends TestCase
                         'address',
                         'latitude',
                         'longitude',
-                        'status',
                     ],
                 ],
             ]);
@@ -78,79 +77,14 @@ class TrackingOrderApiTest extends TestCase
             ->assertJsonPath('success', false);
     }
 
-    public function test_courier_can_upload_pod_photos_and_mark_as_delivered(): void
+    public function test_lookup_by_sj_accepts_numbers_with_slashes(): void
     {
         $this->actAsCourier();
-        Storage::fake('public');
+        TrackingOrder::create(['no_sj' => 'SJ/CRB/0007', 'nama_dealer' => 'Toko']);
 
-        $order = TrackingOrder::create([
-            'no_sj' => 'SJ-MOBILE-TEST-001',
-            'nama_dealer' => 'Dealer Bintang Selular',
-            'alamat_dealer' => 'Jl. Merdeka No. 10 Bandung',
-            'jumlah_value_nota' => 2500000,
-            'tanggal_pengiriman' => now()->toDateString(),
-            'nama_pengirim' => 'Budi Santoso',
-            'status' => 'IN_TRANSIT',
-        ]);
-
-        $notaSjImage = UploadedFile::fake()->image('nota_sj_camera.jpg', 800, 600);
-        $penerimaImage = UploadedFile::fake()->image('penerima_camera.jpg', 800, 600);
-
-        $payload = [
-            'nama_penerima' => 'Ibu Siti Khodijah (Kepala Toko)',
-            'address' => 'Jl. Merdeka No. 10 Bandung',
-            'latitude' => -6.917464,
-            'longitude' => 107.619123,
-            'notes' => 'Barang diterima lengkap dan segel utuh',
-            'foto_nota_sj' => $notaSjImage,
-            'foto_penerima' => $penerimaImage,
-        ];
-
-        $response = $this->postJson("/api/tracking-orders/{$order->id}/submit-pod", $payload);
-
-        $response->assertStatus(200)
-            ->assertJsonPath('success', true)
-            ->assertJsonPath('data.nama_penerima', 'Ibu Siti Khodijah (Kepala Toko)')
-            ->assertJsonPath('data.latitude', -6.917464)
-            ->assertJsonPath('data.longitude', 107.619123)
-            ->assertJsonPath('data.status', 'DELIVERED')
-            ->assertJsonMissingPath('data.is_delivered');
-
-        $order->refresh();
-        $this->assertSame('DELIVERED', $order->status);
-        $this->assertSame('Ibu Siti Khodijah (Kepala Toko)', $order->nama_penerima);
-        $this->assertEquals(-6.917464, $order->latitude);
-        $this->assertEquals(107.619123, $order->longitude);
-        $this->assertNotNull($order->foto_nota_sj);
-        $this->assertNotNull($order->foto_penerima);
-
-        Storage::disk('public')->assertExists($order->foto_nota_sj);
-        Storage::disk('public')->assertExists($order->foto_penerima);
-    }
-
-    public function test_courier_can_submit_pod_directly_by_no_sj(): void
-    {
-        $this->actAsCourier();
-        Storage::fake('public');
-
-        $order = TrackingOrder::create([
-            'no_sj' => 'SJ-DIRECT-SCAN-889',
-            'nama_dealer' => 'Toko Cahaya Abadi',
-            'status' => 'PENDING',
-        ]);
-
-        $response = $this->postJson('/api/tracking-orders/by-sj/SJ-DIRECT-SCAN-889/submit-pod', [
-            'nama_penerima' => 'Pak Hendra',
-            'notes' => 'Diserahkan langsung ke pemilik toko',
-        ]);
-
-        $response->assertStatus(200)
-            ->assertJsonPath('success', true)
-            ->assertJsonPath('data.status', 'DELIVERED');
-
-        $order->refresh();
-        $this->assertSame('DELIVERED', $order->status);
-        $this->assertSame('Pak Hendra', $order->nama_penerima);
+        $this->getJson('/api/tracking-orders/by-sj/'.rawurlencode('SJ/CRB/0007'))
+            ->assertOk()
+            ->assertJsonPath('data.no_sj', 'SJ/CRB/0007');
     }
 
     public function test_can_get_courier_drivers_list_and_summary(): void
@@ -171,92 +105,74 @@ class TrackingOrderApiTest extends TestCase
                     'total_assigned',
                     'total_delivered',
                     'total_pending',
-                    'total_returned',
                     'delivery_rate_percentage',
                 ],
             ])
-            ->assertJsonMissingPath('data.total_in_transit');
+            ->assertJsonMissingPath('data.total_in_transit')
+            ->assertJsonMissingPath('data.total_returned');
     }
 
-    public function test_auto_resolves_location_and_stamps_photo_when_courier_only_sends_coordinates(): void
+    public function test_courier_records_every_column_in_one_request_at_the_receiving_point(): void
     {
         $this->actAsCourier();
         Storage::fake('public');
-
-        $order = TrackingOrder::create([
-            'no_sj' => 'SJ-COORDS-ONLY-999',
-            'nama_dealer' => 'Toko Elektronik Makmur',
-            'alamat_dealer' => 'Jl. Purnawarman No. 12 Bandung',
-            'status' => 'IN_TRANSIT',
-        ]);
-
-        $photo = UploadedFile::fake()->image('pod_captured.jpg', 1000, 800);
-
-        // Courier takes photo and only GPS coordinates are sent from device, address is empty!
-        $response = $this->postJson("/api/tracking-orders/{$order->id}/submit-pod", [
-            'nama_penerima' => 'Pak Joko',
-            'latitude' => -6.903890,
-            'longitude' => 107.618610,
-            'foto_penerima' => $photo,
-        ]);
-
-        $response->assertStatus(200)
-            ->assertJsonPath('success', true)
-            ->assertJsonPath('data.status', 'DELIVERED');
-
-        $order->refresh();
-        $this->assertNotEmpty($order->address);
-        $this->assertEquals(-6.903890, $order->latitude);
-        $this->assertEquals(107.618610, $order->longitude);
-
-        // Photo was saved with watermark to public storage
-        $this->assertNotNull($order->foto_penerima);
-        Storage::disk('public')->assertExists($order->foto_penerima);
-    }
-
-    public function test_user_can_create_tracking_order_via_api(): void
-    {
-        $user = $this->actAsCourier();
-        Storage::fake('public');
-
-        $notaSjImage = UploadedFile::fake()->image('nota_sj.jpg', 600, 400);
 
         $payload = [
             'no_sj' => 'SJ-MOBILE-NEW-999',
             'nama_dealer' => 'Toko Abadi Jaya Selular',
             'alamat_dealer' => 'Jl. Asia Afrika No. 45, Bandung',
             'jumlah_value_nota' => 1500000,
-            'tanggal_nota' => '2026-10-02',
+            'tanggal_nota' => '2026-10-01',
             'tanggal_pengiriman' => '2026-10-02',
             'nama_pengirim' => 'Supir Budi',
+            'nama_penerima' => 'Ibu Siti (Kepala Toko)',
+            'address' => 'Jl. Asia Afrika No. 47, Braga, Bandung',
             'latitude' => -6.917464,
             'longitude' => 107.619123,
-            'status' => 'IN_TRANSIT',
             'notes' => 'Pengiriman koli 3 box handphone',
-            'foto_nota_sj' => $notaSjImage,
+            'foto_nota_sj' => UploadedFile::fake()->image('nota_sj.jpg', 600, 400),
+            'foto_penerima' => UploadedFile::fake()->image('penerima.jpg', 600, 400),
         ];
 
         $response = $this->postJson('/api/tracking-orders', $payload);
 
-        $response->assertStatus(201)
+        $response->assertCreated()
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.no_sj', 'SJ-MOBILE-NEW-999')
             ->assertJsonPath('data.nama_dealer', 'Toko Abadi Jaya Selular')
+            ->assertJsonPath('data.alamat_dealer', 'Jl. Asia Afrika No. 45, Bandung')
+            ->assertJsonPath('data.jumlah_value_nota', 1500000)
+            ->assertJsonPath('data.tanggal_nota', '2026-10-01')
+            ->assertJsonPath('data.tanggal_pengiriman', '2026-10-02')
+            ->assertJsonPath('data.nama_pengirim', 'Supir Budi')
+            ->assertJsonPath('data.nama_penerima', 'Ibu Siti (Kepala Toko)')
+            ->assertJsonPath('data.address', 'Jl. Asia Afrika No. 47, Braga, Bandung')
             ->assertJsonPath('data.latitude', -6.917464)
             ->assertJsonPath('data.longitude', 107.619123)
-            ->assertJsonPath('data.status', 'IN_TRANSIT');
-
-        $this->assertDatabaseHas('tracking_orders', [
-            'no_sj' => 'SJ-MOBILE-NEW-999',
-            'nama_dealer' => 'Toko Abadi Jaya Selular',
-            'latitude' => -6.917464,
-            'longitude' => 107.619123,
-            'status' => 'IN_TRANSIT',
-        ]);
+            ->assertJsonPath('data.notes', 'Pengiriman koli 3 box handphone')
+            ->assertJsonPath('data.foto_nota_sj_url', fn ($url) => is_string($url) && str_contains($url, 'tracking-orders/nota/'))
+            ->assertJsonPath('data.foto_penerima_url', fn ($url) => is_string($url) && str_contains($url, 'tracking-orders/penerima/'))
+            ->assertJsonMissingPath('data.status');
 
         $order = TrackingOrder::where('no_sj', 'SJ-MOBILE-NEW-999')->firstOrFail();
-        $this->assertNotNull($order->foto_nota_sj);
+        $this->assertSame('Ibu Siti (Kepala Toko)', $order->nama_penerima);
+        $this->assertSame('2026-10-01', $order->tanggal_nota->toDateString());
+        $this->assertEquals(-6.917464, $order->latitude);
         Storage::disk('public')->assertExists($order->foto_nota_sj);
+        Storage::disk('public')->assertExists($order->foto_penerima);
+    }
+
+    public function test_submit_pod_endpoints_are_gone(): void
+    {
+        $this->actAsCourier();
+
+        $order = TrackingOrder::create(['no_sj' => 'SJ-NO-POD', 'nama_dealer' => 'Toko']);
+
+        $this->postJson("/api/tracking-orders/{$order->id}/submit-pod", ['nama_penerima' => 'X'])
+            ->assertNotFound();
+        // The by-sj lookup now owns the rest of the path, so the old POST URL is a method mismatch.
+        $this->postJson('/api/tracking-orders/by-sj/SJ-NO-POD/submit-pod', ['nama_penerima' => 'X'])
+            ->assertMethodNotAllowed();
     }
 
     public function test_user_cannot_create_tracking_order_with_invalid_coordinates(): void
@@ -281,7 +197,6 @@ class TrackingOrderApiTest extends TestCase
         TrackingOrder::create([
             'no_sj' => 'SJ-EXISTING-123',
             'nama_dealer' => 'Dealer Lama',
-            'status' => 'IN_TRANSIT',
         ]);
 
         $response = $this->postJson('/api/tracking-orders', [
@@ -300,7 +215,7 @@ class TrackingOrderApiTest extends TestCase
         $response = $this->postJson('/api/tracking-orders', []);
 
         $response->assertStatus(422)
-            ->assertJsonValidationErrors(['no_sj', 'nama_dealer']);
+            ->assertJsonValidationErrors(['no_sj', 'nama_dealer', 'nama_penerima', 'foto_nota_sj', 'foto_penerima']);
     }
 
     private function actAsCourier(): User

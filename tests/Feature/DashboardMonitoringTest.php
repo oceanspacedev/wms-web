@@ -38,7 +38,7 @@ class DashboardMonitoringTest extends TestCase
         $admin = User::where('email', 'admin@example.com')->firstOrFail();
 
         $response = $this->actingAs($admin)
-            ->withHeader('Referer', 'http://whms-web.test/log-viewer')
+            ->withHeader('Referer', 'http://wms-web.test/log-viewer')
             ->getJson('/log-viewer/api/folders?direction=desc');
 
         $response->assertOk();

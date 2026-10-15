@@ -11,6 +11,15 @@ class PurchaseOrder extends Model
     /** @use HasFactory<PurchaseOrderFactory> */
     use HasFactory;
 
+    public const RECEIPT_COMPLETE = 'Lengkap';
+
+    /**
+     * What the warehouse found on arrival; anything but complete needs a note.
+     *
+     * @var list<string>
+     */
+    public const RECEIPT_STATUSES = [self::RECEIPT_COMPLETE, 'Kurang', 'Rusak'];
+
     /**
      * The attributes that are mass assignable.
      *
@@ -18,8 +27,8 @@ class PurchaseOrder extends Model
      */
     protected $fillable = [
         'no_po',
-        'no_sj_supplier',
-        'tanggal_po',
+        'no_do',
+        'tanggal_do',
         'tanggal_datang',
         'nama_supplier',
         'nama_gudang',
@@ -33,7 +42,12 @@ class PurchaseOrder extends Model
         'keterangan_barang',
         'status_penerimaan',
         'catatan_gudang',
-        'bukti_serah_terima',
+        'foto_do',
+        'foto_resi',
+        'foto_penerimaan',
+        'address',
+        'latitude',
+        'longitude',
         'status_verifikasi_finance',
         'catatan_finance',
         'verified_by',
@@ -48,12 +62,14 @@ class PurchaseOrder extends Model
     protected function casts(): array
     {
         return [
-            'tanggal_po' => 'date',
+            'tanggal_do' => 'date',
             'tanggal_datang' => 'date',
             'verified_at' => 'datetime',
             'total_nominal' => 'decimal:2',
             'qty_koli' => 'integer',
             'qty_unit' => 'integer',
+            'latitude' => 'float',
+            'longitude' => 'float',
         ];
     }
 }

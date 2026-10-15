@@ -16,9 +16,18 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 #[Group('Purchase Order', 'Akses data penerimaan barang gudang.', 4)]
 class PurchaseOrderApiController extends Controller
 {
+    /**
+     * @var array<string, string>
+     */
+    public const PHOTO_DIRECTORIES = [
+        'foto_do' => 'purchase-orders/do',
+        'foto_resi' => 'purchase-orders/resi',
+        'foto_penerimaan' => 'purchase-orders/penerimaan',
+    ];
+
     #[Endpoint(
-        title: 'Buat purchase order',
-        description: 'Menyimpan PO: no_po, supplier, gudang, qty, nominal, bukti serah terima. Response `data` adalah PurchaseOrderResource.',
+        title: 'Catat penerimaan purchase order',
+        description: 'Gudang mencatat PO sekali jalan saat barang tiba: data DO (no_do, nama_supplier, tanggal_do, qty, keterangan; no_po opsional karena gudang umumnya tidak tahu nomor PO dan diisi purchasing saat pencocokan), resi ekspedisi bila ada (nama_kurir_ekspedisi, no_resi, qty_koli), status_penerimaan (Lengkap, Kurang, Rusak; selain Lengkap wajib catatan_gudang), lokasi (address, latitude, longitude), serta foto_do, foto_resi (opsional), dan foto_penerimaan. Response `data` adalah PurchaseOrderResource.',
     )]
     public function store(CreatePurchaseOrderRequest $request): JsonResponse
     {
@@ -29,9 +38,9 @@ class PurchaseOrderApiController extends Controller
             ?? $request->user()?->username;
 
         $poData = [
-            'no_po' => trim($validated['no_po']),
-            'no_sj_supplier' => ! empty($validated['no_sj_supplier']) ? trim($validated['no_sj_supplier']) : null,
-            'tanggal_po' => $validated['tanggal_po'] ?? now()->toDateString(),
+            'no_po' => filled($validated['no_po'] ?? null) ? trim($validated['no_po']) : null,
+            'no_do' => trim($validated['no_do']),
+            'tanggal_do' => $validated['tanggal_do'] ?? null,
             'tanggal_datang' => $validated['tanggal_datang'] ?? now()->toDateString(),
             'nama_supplier' => trim($validated['nama_supplier']),
             'nama_gudang' => $validated['nama_gudang'] ?? 'GUDANG UTAMA',
@@ -41,32 +50,36 @@ class PurchaseOrderApiController extends Controller
             'penerima_gudang' => $receiverName,
             'qty_koli' => $validated['qty_koli'] ?? 1,
             'qty_unit' => $validated['qty_unit'] ?? 0,
-            'total_nominal' => $validated['total_nominal'] ?? 0,
             'keterangan_barang' => $validated['keterangan_barang'] ?? null,
-            'status_penerimaan' => $validated['status_penerimaan'] ?? 'Lengkap',
+            'status_penerimaan' => $validated['status_penerimaan'],
             'catatan_gudang' => $validated['catatan_gudang'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'latitude' => $validated['latitude'] ?? null,
+            'longitude' => $validated['longitude'] ?? null,
             'status_verifikasi_finance' => 'Menunggu Pemeriksaan',
         ];
 
-        if ($request->hasFile('bukti_serah_terima')) {
-            $poData['bukti_serah_terima'] = $request->file('bukti_serah_terima')->store('purchase-orders/bukti', 'public');
+        foreach (self::PHOTO_DIRECTORIES as $field => $directory) {
+            if ($request->hasFile($field)) {
+                $poData[$field] = $request->file($field)->store($directory, 'public');
+            }
         }
 
         $purchaseOrder = PurchaseOrder::create($poData);
 
         return response()->json([
             'success' => true,
-            'message' => "Purchase Order {$purchaseOrder->no_po} berhasil dibuat.",
+            'message' => "Penerimaan barang DO {$purchaseOrder->no_do} berhasil dicatat.",
             'data' => new PurchaseOrderResource($purchaseOrder),
         ], 201);
     }
 
     #[Endpoint(
         title: 'Daftar purchase order',
-        description: 'Mengembalikan halaman PurchaseOrderResource. Filter search (no_po, SJ supplier, nama_supplier) dan status_penerimaan.',
+        description: 'Mengembalikan halaman PurchaseOrderResource. Filter search (no_po, no_do, no_resi, nama_supplier) dan status_penerimaan.',
     )]
-    #[QueryParameter('search', 'Cari no_po, no_sj_supplier, atau nama_supplier.', type: 'string')]
-    #[QueryParameter('status_penerimaan', 'Lengkap, Kurang, Rusak, atau Belum Datang.', type: 'string')]
+    #[QueryParameter('search', 'Cari no_po, no_do, no_resi, atau nama_supplier.', type: 'string')]
+    #[QueryParameter('status_penerimaan', 'Lengkap, Kurang, atau Rusak.', type: 'string')]
     #[QueryParameter('per_page', 'Jumlah item per halaman, maksimum 100.', type: 'integer')]
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -76,7 +89,8 @@ class PurchaseOrderApiController extends Controller
             $search = $request->string('search')->toString();
             $query->where(function ($builder) use ($search): void {
                 $builder->where('no_po', 'like', "%{$search}%")
-                    ->orWhere('no_sj_supplier', 'like', "%{$search}%")
+                    ->orWhere('no_do', 'like', "%{$search}%")
+                    ->orWhere('no_resi', 'like', "%{$search}%")
                     ->orWhere('nama_supplier', 'like', "%{$search}%");
             });
         }
@@ -88,8 +102,17 @@ class PurchaseOrderApiController extends Controller
         $perPage = min($request->integer('per_page', 20), 100);
 
         return PurchaseOrderResource::collection(
-            $query->latest('tanggal_po')->paginate($perPage)
+            $query->latest('tanggal_datang')->latest('id')->paginate($perPage)
         );
+    }
+
+    #[Endpoint(
+        title: 'Detail penerimaan purchase order by ID',
+        description: 'Mengembalikan satu PurchaseOrderResource. Dipakai aplikasi karena no_po bisa masih kosong.',
+    )]
+    public function show(PurchaseOrder $purchaseOrder): PurchaseOrderResource
+    {
+        return new PurchaseOrderResource($purchaseOrder);
     }
 
     #[Endpoint(
@@ -102,12 +125,12 @@ class PurchaseOrderApiController extends Controller
     }
 
     #[Endpoint(
-        title: 'Cari purchase order by SJ supplier',
-        description: 'Lookup `no_sj_supplier`. Response `data` PurchaseOrderResource, atau 404 jika tidak ada.',
+        title: 'Cari purchase order by nomor DO',
+        description: 'Lookup `no_do` (DO / surat jalan supplier). Response `data` PurchaseOrderResource, atau 404 jika tidak ada.',
     )]
-    public function findBySupplierSj(string $noSj): JsonResponse
+    public function findByNoDo(string $noDo): JsonResponse
     {
-        return $this->findOrder('no_sj_supplier', $noSj, 'Surat Jalan supplier');
+        return $this->findOrder('no_do', $noDo, 'DO');
     }
 
     private function findOrder(string $column, string $value, string $label): JsonResponse

@@ -2,7 +2,6 @@
 
 namespace Database\Seeders;
 
-use App\Models\CsaShipment;
 use App\Models\TrackingOrder;
 use Illuminate\Database\Seeder;
 
@@ -26,7 +25,6 @@ class TrackingOrderSeeder extends Seeder
                 'foto_nota_sj' => 'scaled_c02a6555-d230-49e7-8069-43275fe1ee662732127237249734592.jpg',
                 'foto_penerima' => '20240130_142636.jpg',
                 'address' => 'Jalan Ibu Inggit Garnasih, Ciateul, Bandung City, West Java, Indonesia',
-                'status' => 'DELIVERED',
             ],
             [
                 'no_sj' => '2401304461',
@@ -40,7 +38,6 @@ class TrackingOrderSeeder extends Seeder
                 'foto_nota_sj' => 'scaled_35c0bf62-2104-4e0d-ae3a-4aff493fdb1b9083617217951705276.jpg',
                 'foto_penerima' => 'MEGA LESTARI JAYA_30012024_162203.jpg',
                 'address' => 'Jl. Purnawarman, Tamansari, Bandung City, West Java',
-                'status' => 'DELIVERED',
             ],
             [
                 'no_sj' => '2401304502',
@@ -54,7 +51,6 @@ class TrackingOrderSeeder extends Seeder
                 'foto_nota_sj' => 'scaled_21fa39a4-f2af-4013-8536-ad0f3fa4e04f7085142680156380156.jpg',
                 'foto_penerima' => 'SARANA KOMUNIKA_30012024_165510.jpg',
                 'address' => 'Jl. Istiqomah No.42, Lembang, Kec. Lembang, Kabupaten Bandung Barat',
-                'status' => 'DELIVERED',
             ],
             [
                 'no_sj' => '2401304508',
@@ -68,7 +64,6 @@ class TrackingOrderSeeder extends Seeder
                 'foto_nota_sj' => 'scaled_bcc70c98-49f8-44a1-b902-b4ca0ed2fd8a756744496089512706.jpg',
                 'foto_penerima' => 'ahmad store_30012024_155440.jpg',
                 'address' => 'Jalan Sapujagat Jalan Sadang Serang No.53, RT.3/RW.9, Sukaluyu, Bandung City, West Java, Indonesia',
-                'status' => 'DELIVERED',
             ],
             [
                 'no_sj' => '2401304528',
@@ -82,7 +77,6 @@ class TrackingOrderSeeder extends Seeder
                 'foto_nota_sj' => 'IMG-20240131-WA0002.jpg',
                 'foto_penerima' => 'IMG-20240130-WA0007.jpg',
                 'address' => 'Jalan Pasar Prambanan, Kecamatan Prambanan',
-                'status' => 'DELIVERED',
             ],
             [
                 'no_sj' => '1062',
@@ -96,7 +90,6 @@ class TrackingOrderSeeder extends Seeder
                 'foto_nota_sj' => 'scaled_ceeacbaa-1fde-4e6a-bd4e-1951dab6f54a5281254191116434164.jpg',
                 'foto_penerima' => 'scaled_abaebbf-c73d-427d-bc26-bf16d8e230ee656717883945564686.jpg',
                 'address' => 'Jl. Raya Cisoka, Adiyasa no 14 RT : 002 RW : 005 Kelurahan : Cikasungka, Kec. Solear',
-                'status' => 'DELIVERED',
             ],
             [
                 'no_sj' => '2401304455',
@@ -110,14 +103,10 @@ class TrackingOrderSeeder extends Seeder
                 'foto_nota_sj' => 'IMG_20240130_185757.jpg',
                 'foto_penerima' => 'IMG_20240130_185731.jpg',
                 'address' => 'Kisabalanang, Marikangen, Kec. Plumbon, Kabupaten Cirebon',
-                'status' => 'DELIVERED',
             ],
         ];
 
         foreach ($orders as $order) {
-            $shipment = CsaShipment::where('no_sj', $order['no_sj'])->first();
-            $order['csa_shipment_id'] = $shipment?->id;
-
             TrackingOrder::updateOrCreate(
                 ['no_sj' => $order['no_sj']],
                 $order

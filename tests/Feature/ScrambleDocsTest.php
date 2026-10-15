@@ -26,7 +26,7 @@ class ScrambleDocsTest extends TestCase
 
         $response->assertStatus(200)
             ->assertJsonPath('openapi', '3.1.0')
-            ->assertJsonPath('info.title', 'WHMS API Documentation');
+            ->assertJsonPath('info.title', 'WMS API Documentation');
     }
 
     public function test_user_with_permission_can_access_docs_in_production(): void

@@ -13,6 +13,21 @@ class UpdateUserProfilePhotoRequest extends FormRequest
     }
 
     /**
+     * Older sam-app builds upload the photo as `profile_photo`; treat it as
+     * `avatar_url` so they keep working without documenting a second field.
+     */
+    protected function prepareForValidation(): void
+    {
+        if ($this->files->has('avatar_url') || ! $this->files->has('profile_photo')) {
+            return;
+        }
+
+        $this->files->set('avatar_url', $this->files->get('profile_photo'));
+        $this->files->remove('profile_photo');
+        $this->convertedFiles = null;
+    }
+
+    /**
      * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array

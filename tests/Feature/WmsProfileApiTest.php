@@ -73,7 +73,6 @@ class WmsProfileApiTest extends TestCase
             'nama_pengirim' => 'Budi Santoso',
             'tanggal_pengiriman' => now()->toDateString(),
             'foto_penerima' => 'penerima_1.jpg',
-            'status' => 'DELIVERED',
         ]);
 
         // 2. Order today for Budi - Delivered with recipient name
@@ -83,7 +82,6 @@ class WmsProfileApiTest extends TestCase
             'nama_pengirim' => 'Budi Santoso',
             'tanggal_pengiriman' => now()->toDateString(),
             'nama_penerima' => 'Pak Joko',
-            'status' => 'DELIVERED',
         ]);
 
         // 3. Order today for Budi - Pending (no POD yet)
@@ -94,7 +92,6 @@ class WmsProfileApiTest extends TestCase
             'tanggal_pengiriman' => now()->toDateString(),
             'nama_penerima' => null,
             'foto_penerima' => null,
-            'status' => 'IN_TRANSIT',
         ]);
 
         // 4. Order yesterday for Budi (should not be counted in today's profile)
@@ -103,7 +100,6 @@ class WmsProfileApiTest extends TestCase
             'nama_dealer' => 'Dealer D',
             'nama_pengirim' => 'Budi Santoso',
             'tanggal_pengiriman' => now()->subDay()->toDateString(),
-            'status' => 'IN_TRANSIT',
         ]);
 
         // 5. Order today for Doni (different courier)
@@ -112,7 +108,6 @@ class WmsProfileApiTest extends TestCase
             'nama_dealer' => 'Dealer E',
             'nama_pengirim' => 'Doni Driver',
             'tanggal_pengiriman' => now()->toDateString(),
-            'status' => 'IN_TRANSIT',
         ]);
 
         $response = $this->actingAs($user, 'sanctum')->getJson('/api/courier/summary');
@@ -203,6 +198,37 @@ class WmsProfileApiTest extends TestCase
         $this->assertNotSame('avatars/old-photo.jpg', $user->avatar_url);
         Storage::disk('public')->assertExists($user->avatar_url);
         Storage::disk('public')->assertMissing('avatars/old-photo.jpg');
+    }
+
+    public function test_can_update_profile_photo_with_legacy_profile_photo_field(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/me/photo', [
+            'profile_photo' => UploadedFile::fake()->image('profile.jpg', 400, 400),
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.avatar_url', fn ($url) => is_string($url) && str_contains($url, 'avatars/'));
+
+        $user->refresh();
+        $this->assertNotNull($user->avatar_url);
+        Storage::disk('public')->assertExists($user->avatar_url);
+    }
+
+    public function test_update_profile_photo_rejects_non_image_file(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/me/photo', [
+            'avatar_url' => UploadedFile::fake()->create('profile.pdf', 10, 'application/pdf'),
+        ]);
+
+        $response->assertUnprocessable()
+            ->assertJsonValidationErrors(['avatar_url']);
     }
 
     public function test_update_profile_photo_validates_required_avatar_url(): void

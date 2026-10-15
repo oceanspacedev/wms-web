@@ -18,23 +18,26 @@ class PurchaseOrdersTable
     {
         return $table
             ->columns([
+                TextColumn::make('no_do')
+                    ->label('No. DO')
+                    ->weight('bold')
+                    ->copyable()
+                    ->searchable()
+                    ->sortable()
+                    ->placeholder('-'),
+
                 TextColumn::make('no_po')
                     ->label('No. PO')
                     ->searchable()
                     ->sortable()
                     ->copyable()
-                    ->weight('bold'),
+                    ->placeholder('Belum dicocokkan'),
 
-                TextColumn::make('no_sj_supplier')
-                    ->label('SJ Supplier')
-                    ->searchable()
+                TextColumn::make('tanggal_do')
+                    ->label('Tgl DO')
+                    ->date('d/m/Y')
                     ->sortable()
                     ->placeholder('-'),
-
-                TextColumn::make('tanggal_po')
-                    ->label('Tgl PO')
-                    ->date('d/m/Y')
-                    ->sortable(),
 
                 TextColumn::make('nama_supplier')
                     ->label('Supplier')
@@ -95,8 +98,9 @@ class PurchaseOrdersTable
                     })
                     ->sortable(),
 
-                ImageColumn::make('bukti_serah_terima')
-                    ->label('Bukti DO / SJ')
+                ImageColumn::make('foto_penerimaan')
+                    ->label('Foto Penerimaan')
+                    ->disk('public')
                     ->circular()
                     ->checkFileExistence(false)
                     ->toggleable(),
@@ -130,7 +134,6 @@ class PurchaseOrdersTable
                         'Lengkap' => 'Lengkap (Sesuai PO)',
                         'Kurang' => 'Kurang / Sebagian',
                         'Rusak' => 'Ada Rusak / Cacat',
-                        'Belum Datang' => 'Belum Datang',
                     ]),
 
                 SelectFilter::make('status_verifikasi_finance')

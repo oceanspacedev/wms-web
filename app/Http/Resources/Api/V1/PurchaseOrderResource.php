@@ -23,12 +23,12 @@ class PurchaseOrderResource extends JsonResource
         return [
             /** ID purchase order. @var int */
             'id' => $this->id,
-            /** Nomor PO. @var string */
+            /** Nomor PO; kosong sampai purchasing mencocokkan penerimaan ini. @var string|null */
             'no_po' => $this->no_po,
-            /** Nomor SJ supplier. @var string|null */
-            'no_sj_supplier' => $this->no_sj_supplier,
-            /** Tanggal PO (Y-m-d). @var string|null */
-            'tanggal_po' => $this->tanggal_po?->format('Y-m-d'),
+            /** Nomor DO / surat jalan supplier. @var string */
+            'no_do' => $this->no_do,
+            /** Tanggal DO (Y-m-d). @var string|null */
+            'tanggal_do' => $this->tanggal_do?->format('Y-m-d'),
             /** Tanggal datang (Y-m-d). @var string|null */
             'tanggal_datang' => $this->tanggal_datang?->format('Y-m-d'),
             /** Nama supplier. @var string */
@@ -47,16 +47,24 @@ class PurchaseOrderResource extends JsonResource
             'qty_koli' => (int) $this->qty_koli,
             /** Jumlah unit. @var int */
             'qty_unit' => (int) $this->qty_unit,
-            /** Total nominal. @var float */
-            'total_nominal' => (float) $this->total_nominal,
             /** Keterangan barang. @var string|null */
             'keterangan_barang' => $this->keterangan_barang,
-            /** Status penerimaan gudang. @var string */
+            /** Lengkap, Kurang, atau Rusak. @var string */
             'status_penerimaan' => $this->status_penerimaan,
             /** Catatan gudang. @var string|null */
             'catatan_gudang' => $this->catatan_gudang,
-            /** URL bukti serah terima. @var string|null */
-            'bukti_serah_terima_url' => $this->resolvePhotoUrl($this->bukti_serah_terima, 'purchase-orders/bukti'),
+            /** URL foto DO. @var string|null */
+            'foto_do_url' => $this->resolvePhotoUrl($this->foto_do, 'purchase-orders/do'),
+            /** URL foto resi ekspedisi. @var string|null */
+            'foto_resi_url' => $this->resolvePhotoUrl($this->foto_resi, 'purchase-orders/resi'),
+            /** URL foto penerimaan barang (watermark GPS). @var string|null */
+            'foto_penerimaan_url' => $this->resolvePhotoUrl($this->foto_penerimaan, 'purchase-orders/penerimaan'),
+            /** Alamat lokasi penerimaan. @var string|null */
+            'address' => $this->address,
+            /** Latitude lokasi penerimaan. @var float|null */
+            'latitude' => $this->latitude !== null ? (float) $this->latitude : null,
+            /** Longitude lokasi penerimaan. @var float|null */
+            'longitude' => $this->longitude !== null ? (float) $this->longitude : null,
             /** Waktu dibuat (ISO 8601). @var string|null */
             'created_at' => $this->created_at?->toISOString(),
             /** Waktu diubah (ISO 8601). @var string|null */

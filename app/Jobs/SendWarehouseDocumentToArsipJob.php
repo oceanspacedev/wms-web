@@ -53,7 +53,7 @@ class SendWarehouseDocumentToArsipJob implements ShouldQueue
         }
 
         if (! Storage::disk('local')->exists($this->document->file_path)) {
-            $this->markFailed('File dokumen tidak ditemukan di WHMS.');
+            $this->markFailed('File dokumen tidak ditemukan di WMS.');
 
             return;
         }

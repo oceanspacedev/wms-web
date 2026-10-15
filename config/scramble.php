@@ -54,11 +54,11 @@ return [
         /*
          * Description rendered on the home page of the API documentation (`/docs/api`).
          */
-        'description' => 'Dokumentasi REST API WHMS (Warehouse Management System & Courier Tracking).',
+        'description' => 'Dokumentasi REST API WMS (Warehouse Management System & Courier Tracking).',
     ],
 
     'ui' => [
-        'title' => 'WHMS API Documentation',
+        'title' => 'WMS API Documentation',
     ],
 
     /*

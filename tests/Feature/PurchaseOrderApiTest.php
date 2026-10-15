@@ -34,8 +34,8 @@ class PurchaseOrderApiTest extends TestCase
                     '*' => [
                         'id',
                         'no_po',
-                        'no_sj_supplier',
-                        'tanggal_po',
+                        'no_do',
+                        'tanggal_do',
                         'tanggal_datang',
                         'nama_supplier',
                         'nama_gudang',
@@ -45,25 +45,30 @@ class PurchaseOrderApiTest extends TestCase
                         'penerima_gudang',
                         'qty_koli',
                         'qty_unit',
-                        'total_nominal',
                         'keterangan_barang',
                         'status_penerimaan',
                         'catatan_gudang',
-                        'bukti_serah_terima_url',
+                        'foto_do_url',
+                        'foto_resi_url',
+                        'foto_penerimaan_url',
+                        'address',
+                        'latitude',
+                        'longitude',
                     ],
                 ],
             ]);
 
         $first = $response->json('data.0');
         $this->assertIsArray($first);
-        $this->assertArrayNotHasKey('bukti_serah_terima', $first);
+        $this->assertArrayNotHasKey('foto_do', $first);
+        $this->assertArrayNotHasKey('total_nominal', $first);
         $this->assertArrayNotHasKey('status_verifikasi_finance', $first);
         $this->assertArrayNotHasKey('catatan_finance', $first);
 
         $this->assertTrue(collect($response->json('data'))->every(fn ($item) => $item['status_penerimaan'] === 'Lengkap'));
     }
 
-    public function test_can_find_purchase_order_by_po_and_sj(): void
+    public function test_can_find_purchase_order_by_po_and_do(): void
     {
         $this->actAsUser();
         $this->seed(PurchaseOrderSeeder::class);
@@ -75,55 +80,151 @@ class PurchaseOrderApiTest extends TestCase
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.no_po', $order->no_po);
 
-        $bySj = $this->getJson("/api/purchase-orders/by-sj/{$order->no_sj_supplier}");
-        $bySj->assertStatus(200)
+        $byDo = $this->getJson("/api/purchase-orders/by-do/{$order->no_do}");
+        $byDo->assertStatus(200)
             ->assertJsonPath('success', true)
-            ->assertJsonPath('data.no_sj_supplier', $order->no_sj_supplier);
+            ->assertJsonPath('data.no_do', $order->no_do);
     }
 
-    public function test_user_can_create_purchase_order_via_api(): void
+    public function test_warehouse_records_do_resi_and_receiving_photo_in_one_request_without_knowing_the_po(): void
     {
         $this->actAsUser();
         Storage::fake('public');
 
-        $photo = UploadedFile::fake()->image('bukti_do.jpg', 600, 400);
-
         $payload = [
-            'no_po' => 'PO-MOBILE-NEW-001',
-            'no_sj_supplier' => 'SJ-SUPP-9912',
-            'nama_supplier' => 'PT Harapan Indah Jaya',
-            'nama_gudang' => 'GUDANG MSIS BANDUNG',
-            'alamat_gudang' => 'Jl. Soekarno Hatta No. 100, Bandung',
-            'nama_kurir_ekspedisi' => 'J&T Cargo',
-            'no_resi' => 'AWB-JT-887711',
-            'qty_koli' => 5,
-            'qty_unit' => 200,
-            'total_nominal' => 25000000,
-            'keterangan_barang' => 'Pengiriman 5 Koli Smartphone Galaxy A55',
+            'no_do' => '20240506_63',
+            'nama_supplier' => 'PT Aris Keep Going',
+            'tanggal_do' => '2026-10-01',
+            'nama_gudang' => 'CV TOP SELULAR - DL',
+            'alamat_gudang' => 'Jl. Petratean No. 118, Pekalipan, Cirebon',
+            'nama_kurir_ekspedisi' => '21 Express',
+            'no_resi' => '100239400253',
+            'qty_koli' => 3,
+            'qty_unit' => 30,
+            'keterangan_barang' => 'realme Note 80 64GB 4GB Storm Black',
             'status_penerimaan' => 'Lengkap',
-            'catatan_gudang' => 'Kemasan utuh dan segel resmi',
-            'bukti_serah_terima' => $photo,
+            'address' => 'Jl. Petratean No. 118, Cirebon',
+            'latitude' => -6.717,
+            'longitude' => 108.557,
+            'foto_do' => UploadedFile::fake()->image('do.jpg', 600, 400),
+            'foto_resi' => UploadedFile::fake()->image('resi.jpg', 600, 400),
+            'foto_penerimaan' => UploadedFile::fake()->image('penerimaan.jpg', 600, 400),
         ];
 
         $response = $this->postJson('/api/purchase-orders', $payload);
 
-        $response->assertStatus(201)
+        $response->assertCreated()
             ->assertJsonPath('success', true)
-            ->assertJsonPath('data.no_po', 'PO-MOBILE-NEW-001')
-            ->assertJsonPath('data.nama_supplier', 'PT Harapan Indah Jaya')
-            ->assertJsonPath('data.qty_koli', 5)
-            ->assertJsonPath('data.qty_unit', 200);
+            ->assertJsonPath('message', 'Penerimaan barang DO 20240506_63 berhasil dicatat.')
+            ->assertJsonPath('data.no_po', null)
+            ->assertJsonPath('data.no_do', '20240506_63')
+            ->assertJsonPath('data.tanggal_do', '2026-10-01')
+            ->assertJsonPath('data.tanggal_datang', now()->toDateString())
+            ->assertJsonPath('data.nama_kurir_ekspedisi', '21 Express')
+            ->assertJsonPath('data.no_resi', '100239400253')
+            ->assertJsonPath('data.qty_koli', 3)
+            ->assertJsonPath('data.qty_unit', 30)
+            ->assertJsonPath('data.address', 'Jl. Petratean No. 118, Cirebon')
+            ->assertJsonPath('data.latitude', -6.717)
+            ->assertJsonPath('data.longitude', 108.557)
+            ->assertJsonPath('data.foto_do_url', fn ($url) => is_string($url) && str_contains($url, 'purchase-orders/do/'))
+            ->assertJsonPath('data.foto_resi_url', fn ($url) => is_string($url) && str_contains($url, 'purchase-orders/resi/'))
+            ->assertJsonPath('data.foto_penerimaan_url', fn ($url) => is_string($url) && str_contains($url, 'purchase-orders/penerimaan/'))
+            ->assertJsonMissingPath('data.total_nominal');
 
         $this->assertDatabaseHas('purchase_orders', [
-            'no_po' => 'PO-MOBILE-NEW-001',
-            'nama_supplier' => 'PT Harapan Indah Jaya',
+            'no_do' => '20240506_63',
+            'no_po' => null,
             'status_penerimaan' => 'Lengkap',
             'status_verifikasi_finance' => 'Menunggu Pemeriksaan',
         ]);
 
-        $po = PurchaseOrder::where('no_po', 'PO-MOBILE-NEW-001')->firstOrFail();
-        $this->assertNotNull($po->bukti_serah_terima);
-        Storage::disk('public')->assertExists($po->bukti_serah_terima);
+        $po = PurchaseOrder::where('no_do', '20240506_63')->firstOrFail();
+
+        $this->getJson("/api/purchase-orders/{$po->id}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $po->id)
+            ->assertJsonPath('data.no_do', '20240506_63');
+        Storage::disk('public')->assertExists($po->foto_do);
+        Storage::disk('public')->assertExists($po->foto_resi);
+        Storage::disk('public')->assertExists($po->foto_penerimaan);
+    }
+
+    public function test_resi_is_optional_for_goods_delivered_by_the_supplier_fleet(): void
+    {
+        $this->actAsUser();
+        Storage::fake('public');
+
+        $this->postJson('/api/purchase-orders', [
+            'no_po' => 'PO-ARMADA-01',
+            'no_do' => 'DO-ARMADA-01',
+            'nama_supplier' => 'PT Armada Sendiri',
+            'status_penerimaan' => 'Lengkap',
+            'foto_do' => UploadedFile::fake()->image('do.jpg'),
+            'foto_penerimaan' => UploadedFile::fake()->image('penerimaan.jpg'),
+        ])->assertCreated()
+            ->assertJsonPath('data.no_resi', null)
+            ->assertJsonPath('data.foto_resi_url', null);
+    }
+
+    public function test_short_or_damaged_receipt_needs_a_note(): void
+    {
+        $this->actAsUser();
+        Storage::fake('public');
+
+        $payload = [
+            'no_po' => 'PO-KURANG-01',
+            'no_do' => 'DO-KURANG-01',
+            'nama_supplier' => 'PT Supplier',
+            'status_penerimaan' => 'Kurang',
+            'foto_do' => UploadedFile::fake()->image('do.jpg'),
+            'foto_penerimaan' => UploadedFile::fake()->image('penerimaan.jpg'),
+        ];
+
+        $this->postJson('/api/purchase-orders', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['catatan_gudang']);
+
+        $payload['catatan_gudang'] = 'Kurang 2 unit dari DO';
+        $payload['foto_do'] = UploadedFile::fake()->image('do.jpg');
+        $payload['foto_penerimaan'] = UploadedFile::fake()->image('penerimaan.jpg');
+
+        $this->postJson('/api/purchase-orders', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.status_penerimaan', 'Kurang');
+    }
+
+    public function test_status_belum_datang_is_rejected_because_goods_are_recorded_on_arrival(): void
+    {
+        $this->actAsUser();
+
+        $this->postJson('/api/purchase-orders', ['status_penerimaan' => 'Belum Datang'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['status_penerimaan']);
+    }
+
+    public function test_lookups_accept_document_numbers_with_slashes(): void
+    {
+        $this->actAsUser();
+        PurchaseOrder::factory()->create(['no_do' => 'SJ/MKM/0042', 'no_po' => 'PO/2026/10/001']);
+
+        $this->getJson('/api/purchase-orders/by-do/'.rawurlencode('SJ/MKM/0042'))
+            ->assertOk()
+            ->assertJsonPath('data.no_do', 'SJ/MKM/0042');
+        $this->getJson('/api/purchase-orders/by-po/'.rawurlencode('PO/2026/10/001'))
+            ->assertOk()
+            ->assertJsonPath('data.no_po', 'PO/2026/10/001');
+    }
+
+    public function test_the_same_do_cannot_be_received_twice(): void
+    {
+        $this->actAsUser();
+
+        PurchaseOrder::factory()->create(['no_do' => 'DO-SUDAH-DITERIMA']);
+
+        $this->postJson('/api/purchase-orders', ['no_do' => 'DO-SUDAH-DITERIMA'])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.no_do.0', 'DO ini sudah pernah dicatat diterima.');
     }
 
     public function test_user_cannot_create_purchase_order_with_duplicate_no_po(): void
@@ -155,7 +256,8 @@ class PurchaseOrderApiTest extends TestCase
         $response = $this->postJson('/api/purchase-orders', []);
 
         $response->assertStatus(422)
-            ->assertJsonValidationErrors(['no_po', 'nama_supplier']);
+            ->assertJsonValidationErrors(['no_do', 'nama_supplier', 'status_penerimaan', 'foto_do', 'foto_penerimaan'])
+            ->assertJsonMissingValidationErrors(['no_po', 'foto_resi', 'no_resi']);
     }
 
     private function actAsUser(): User

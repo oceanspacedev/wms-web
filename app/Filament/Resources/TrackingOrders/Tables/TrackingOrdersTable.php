@@ -88,30 +88,9 @@ class TrackingOrdersTable
                 TextColumn::make('longitude')
                     ->label('Long')
                     ->toggleable(isToggledHiddenByDefault: true),
-
-                TextColumn::make('status')
-                    ->label('Status')
-                    ->badge()
-                    ->color(fn (?string $state): string => match ($state) {
-                        'DELIVERED' => 'success',
-                        'IN_TRANSIT' => 'warning',
-                        'PENDING' => 'gray',
-                        'RETURNED' => 'danger',
-                        default => 'primary',
-                    })
-                    ->sortable(),
             ])
             ->defaultSort('tanggal_pengiriman', 'desc')
             ->filters([
-                SelectFilter::make('status')
-                    ->label('Status Pengiriman')
-                    ->options([
-                        'DELIVERED' => 'Terkirim (Delivered)',
-                        'IN_TRANSIT' => 'Dalam Perjalanan (In Transit)',
-                        'PENDING' => 'Menunggu Kirim (Pending)',
-                        'RETURNED' => 'Retur (Returned)',
-                    ]),
-
                 SelectFilter::make('nama_pengirim')
                     ->label('Filter Driver / Pengirim')
                     ->options(fn () => TrackingOrder::whereNotNull('nama_pengirim')->where('nama_pengirim', '!=', '')->distinct()->pluck('nama_pengirim', 'nama_pengirim')->toArray()),
