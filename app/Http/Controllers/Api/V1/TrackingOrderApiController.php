@@ -29,6 +29,7 @@ class TrackingOrderApiController extends Controller
             ?? $request->user()?->username;
 
         $orderData = [
+            'user_id' => $request->user()->id,
             'no_sj' => trim($validated['no_sj']),
             'nama_dealer' => trim($validated['nama_dealer']),
             'alamat_dealer' => $validated['alamat_dealer'] ?? null,
@@ -62,7 +63,7 @@ class TrackingOrderApiController extends Controller
 
     #[Endpoint(
         title: 'Daftar surat jalan',
-        description: 'Mengembalikan halaman TrackingOrderResource. Filter: kurir/nama_pengirim, date/tanggal_pengiriman, search (no_sj, dealer, alamat).',
+        description: 'Mengembalikan halaman TrackingOrderResource milik user yang login (super admin melihat semua). Filter: kurir/nama_pengirim, date/tanggal_pengiriman, search (no_sj, dealer, alamat).',
     )]
     #[QueryParameter('kurir', 'Filter nama pengirim / kurir.', type: 'string')]
     #[QueryParameter('date', 'Tanggal pengiriman Y-m-d.', type: 'string', format: 'date')]
@@ -70,7 +71,7 @@ class TrackingOrderApiController extends Controller
     #[QueryParameter('per_page', 'Jumlah item per halaman, maksimum 100.', type: 'integer')]
     public function index(Request $request): AnonymousResourceCollection
     {
-        $query = TrackingOrder::query();
+        $query = TrackingOrder::query()->visibleTo($request->user());
 
         // Filter by courier / driver name
         if ($request->filled('kurir') || $request->filled('nama_pengirim')) {
@@ -104,18 +105,23 @@ class TrackingOrderApiController extends Controller
         title: 'Detail surat jalan by ID',
         description: 'Mengembalikan satu TrackingOrderResource: identitas SJ, dealer, nominal, tanggal, foto URL, dan lokasi penerimaan (address, latitude, longitude).',
     )]
-    public function show(TrackingOrder $trackingOrder): TrackingOrderResource
+    public function show(Request $request, TrackingOrder $trackingOrder): TrackingOrderResource
     {
+        abort_unless($trackingOrder->isVisibleTo($request->user()), 404);
+
         return new TrackingOrderResource($trackingOrder);
     }
 
     #[Endpoint(
         title: 'Cari surat jalan by nomor SJ',
-        description: 'Lookup barcode/QR. Response `data` TrackingOrderResource, atau 404 jika no_sj tidak ada.',
+        description: 'Lookup barcode/QR di SJ milik user yang login. Response `data` TrackingOrderResource, atau 404 jika no_sj tidak ada.',
     )]
-    public function findByNoSj(string $noSj): JsonResponse
+    public function findByNoSj(Request $request, string $noSj): JsonResponse
     {
-        $order = TrackingOrder::where('no_sj', trim($noSj))->first();
+        $order = TrackingOrder::query()
+            ->visibleTo($request->user())
+            ->where('no_sj', trim($noSj))
+            ->first();
 
         if (! $order) {
             return response()->json([
@@ -136,9 +142,10 @@ class TrackingOrderApiController extends Controller
         title: 'Daftar nama kurir',
         description: 'Mengembalikan array string `data` berisi nama_pengirim unik untuk selector di aplikasi.',
     )]
-    public function drivers(): JsonResponse
+    public function drivers(Request $request): JsonResponse
     {
         $drivers = TrackingOrder::query()
+            ->visibleTo($request->user())
             ->whereNotNull('nama_pengirim')
             ->where('nama_pengirim', '!=', '')
             ->distinct()
@@ -153,26 +160,17 @@ class TrackingOrderApiController extends Controller
 
     #[Endpoint(
         title: 'Ringkasan pengiriman kurir',
-        description: 'Angka `data`: total_assigned, total_delivered, total_pending, delivery_rate_percentage. Terkirim = SJ yang sudah punya foto atau nama penerima. Default: SJ milik user hari ini.',
+        description: 'Angka `data`: total_assigned, total_delivered, total_pending, delivery_rate_percentage. Terkirim = SJ yang sudah punya foto atau nama penerima. Hanya SJ milik user yang login (super admin melihat semua). Default: hari ini.',
     )]
-    #[QueryParameter('kurir', 'Filter nama pengirim. Kosong = user yang login.', type: 'string')]
+    #[QueryParameter('kurir', 'Filter tambahan nama pengirim.', type: 'string')]
     #[QueryParameter('date', 'Tanggal Y-m-d, atau all untuk semua tanggal.', type: 'string')]
     public function courierSummary(Request $request): JsonResponse
     {
-        $query = TrackingOrder::query();
+        $query = TrackingOrder::query()->visibleTo($request->user());
 
         if ($request->filled('kurir') || $request->filled('nama_pengirim')) {
             $kurir = $request->input('kurir', $request->input('nama_pengirim'));
             $query->where('nama_pengirim', 'LIKE', "%{$kurir}%");
-        } elseif ($user = $request->user()) {
-            $identifiers = array_values(array_filter([$user->name, $user->username]));
-            if (! empty($identifiers)) {
-                $query->where(function ($q) use ($identifiers): void {
-                    foreach ($identifiers as $identifier) {
-                        $q->orWhere('nama_pengirim', 'LIKE', "%{$identifier}%");
-                    }
-                });
-            }
         }
 
         if ($request->filled('date')) {

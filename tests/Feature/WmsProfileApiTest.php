@@ -71,6 +71,7 @@ class WmsProfileApiTest extends TestCase
             'no_sj' => 'SJ-TODAY-01',
             'nama_dealer' => 'Dealer A',
             'nama_pengirim' => 'Budi Santoso',
+            'user_id' => $user->id,
             'tanggal_pengiriman' => now()->toDateString(),
             'foto_penerima' => 'penerima_1.jpg',
         ]);
@@ -80,6 +81,7 @@ class WmsProfileApiTest extends TestCase
             'no_sj' => 'SJ-TODAY-02',
             'nama_dealer' => 'Dealer B',
             'nama_pengirim' => 'Budi Santoso',
+            'user_id' => $user->id,
             'tanggal_pengiriman' => now()->toDateString(),
             'nama_penerima' => 'Pak Joko',
         ]);
@@ -89,6 +91,7 @@ class WmsProfileApiTest extends TestCase
             'no_sj' => 'SJ-TODAY-03',
             'nama_dealer' => 'Dealer C',
             'nama_pengirim' => 'Budi Santoso',
+            'user_id' => $user->id,
             'tanggal_pengiriman' => now()->toDateString(),
             'nama_penerima' => null,
             'foto_penerima' => null,
@@ -99,6 +102,7 @@ class WmsProfileApiTest extends TestCase
             'no_sj' => 'SJ-YESTERDAY-01',
             'nama_dealer' => 'Dealer D',
             'nama_pengirim' => 'Budi Santoso',
+            'user_id' => $user->id,
             'tanggal_pengiriman' => now()->subDay()->toDateString(),
         ]);
 

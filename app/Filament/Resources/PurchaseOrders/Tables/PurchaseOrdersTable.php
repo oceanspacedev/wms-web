@@ -2,7 +2,7 @@
 
 namespace App\Filament\Resources\PurchaseOrders\Tables;
 
-use App\Models\PurchaseOrder;
+use App\Filament\Resources\PurchaseOrders\PurchaseOrderResource;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -146,7 +146,7 @@ class PurchaseOrdersTable
 
                 SelectFilter::make('nama_gudang')
                     ->label('Gudang / Depo')
-                    ->options(fn () => PurchaseOrder::whereNotNull('nama_gudang')->where('nama_gudang', '!=', '')->distinct()->pluck('nama_gudang', 'nama_gudang')->toArray()),
+                    ->options(fn () => PurchaseOrderResource::getEloquentQuery()->whereNotNull('nama_gudang')->where('nama_gudang', '!=', '')->distinct()->pluck('nama_gudang', 'nama_gudang')->toArray()),
             ])
             ->recordActions([
                 ViewAction::make(),

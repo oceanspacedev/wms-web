@@ -2,10 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\PurchaseOrders\Pages\ListPurchaseOrders;
 use App\Models\PurchaseOrder;
 use App\Models\User;
 use Database\Seeders\PurchaseOrderSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 class PurchaseOrderTest extends TestCase
@@ -52,5 +56,26 @@ class PurchaseOrderTest extends TestCase
 
         $viewResponse = $this->actingAs($admin)->get("/admin/purchase-orders/{$po->id}");
         $viewResponse->assertStatus(200);
+    }
+
+    public function test_panel_user_only_sees_their_own_purchase_orders_like_the_mobile_app(): void
+    {
+        $permissions = collect(['ViewAny', 'View'])
+            ->map(fn (string $ability): Permission => Permission::findOrCreate("{$ability}:PurchaseOrder", 'web'));
+        $staff = User::factory()->create();
+        $staff->assignRole(Role::findOrCreate('panel_user', 'web'));
+        $staff->givePermissionTo($permissions);
+
+        $ownOrder = PurchaseOrder::factory()->create(['user_id' => $staff->id]);
+        $otherOrder = PurchaseOrder::factory()->create(['user_id' => User::factory()->create()->id]);
+
+        $this->actingAs($staff);
+
+        Livewire::test(ListPurchaseOrders::class)
+            ->assertCanSeeTableRecords([$ownOrder])
+            ->assertCanNotSeeTableRecords([$otherOrder]);
+
+        $this->get("/admin/purchase-orders/{$ownOrder->id}")->assertOk();
+        $this->get("/admin/purchase-orders/{$otherOrder->id}")->assertNotFound();
     }
 }

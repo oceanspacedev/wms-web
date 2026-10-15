@@ -114,6 +114,7 @@ class AuthApiTest extends TestCase
         TrackingOrder::query()->create([
             'no_sj' => 'SJ-API-LOGIN-1',
             'nama_dealer' => 'Dealer Uji',
+            'user_id' => $user->id,
         ]);
 
         $this->withToken($token)
@@ -172,6 +173,7 @@ class AuthApiTest extends TestCase
         $order = PurchaseOrder::factory()->create([
             'no_po' => 'PO-202610-0001',
             'no_do' => 'DO-SUP-0001',
+            'user_id' => $user->id,
         ]);
 
         $this->getJson('/api/purchase-orders/by-po/PO-202610-0001')

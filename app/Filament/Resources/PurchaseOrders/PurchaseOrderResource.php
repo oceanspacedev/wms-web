@@ -10,11 +10,13 @@ use App\Filament\Resources\PurchaseOrders\Schemas\PurchaseOrderForm;
 use App\Filament\Resources\PurchaseOrders\Schemas\PurchaseOrderInfolist;
 use App\Filament\Resources\PurchaseOrders\Tables\PurchaseOrdersTable;
 use App\Models\PurchaseOrder;
+use App\Models\User;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class PurchaseOrderResource extends Resource
 {
@@ -52,6 +54,17 @@ class PurchaseOrderResource extends Resource
         return [
             //
         ];
+    }
+
+    /**
+     * Sama dengan API mobile: selain super admin hanya melihat data yang dicatat akunnya sendiri.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        $query = parent::getEloquentQuery();
+        $user = auth()->user();
+
+        return $user instanceof User ? $query->visibleTo($user) : $query->whereRaw('1 = 0');
     }
 
     public static function getPages(): array

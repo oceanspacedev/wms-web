@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasOwner;
 use Database\Factories\PurchaseOrderFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -9,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 class PurchaseOrder extends Model
 {
     /** @use HasFactory<PurchaseOrderFactory> */
-    use HasFactory;
+    use HasFactory, HasOwner;
 
     public const RECEIPT_COMPLETE = 'Lengkap';
 
@@ -26,6 +27,7 @@ class PurchaseOrder extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'user_id',
         'no_po',
         'no_do',
         'tanggal_do',
@@ -62,6 +64,7 @@ class PurchaseOrder extends Model
     protected function casts(): array
     {
         return [
+            'user_id' => 'integer',
             'tanggal_do' => 'date',
             'tanggal_datang' => 'date',
             'verified_at' => 'datetime',

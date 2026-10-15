@@ -23,8 +23,9 @@ class PurchaseOrderApiTest extends TestCase
 
     public function test_can_list_purchase_orders_and_filter(): void
     {
-        $this->actAsUser();
+        $user = $this->actAsUser();
         $this->seed(PurchaseOrderSeeder::class);
+        PurchaseOrder::query()->update(['user_id' => $user->id]);
 
         $response = $this->getJson('/api/purchase-orders?status_penerimaan=Lengkap');
 
@@ -70,8 +71,9 @@ class PurchaseOrderApiTest extends TestCase
 
     public function test_can_find_purchase_order_by_po_and_do(): void
     {
-        $this->actAsUser();
+        $user = $this->actAsUser();
         $this->seed(PurchaseOrderSeeder::class);
+        PurchaseOrder::query()->update(['user_id' => $user->id]);
 
         $order = PurchaseOrder::firstOrFail();
 
@@ -88,7 +90,7 @@ class PurchaseOrderApiTest extends TestCase
 
     public function test_warehouse_records_do_resi_and_receiving_photo_in_one_request_without_knowing_the_po(): void
     {
-        $this->actAsUser();
+        $user = $this->actAsUser();
         Storage::fake('public');
 
         $payload = [
@@ -140,6 +142,7 @@ class PurchaseOrderApiTest extends TestCase
         ]);
 
         $po = PurchaseOrder::where('no_do', '20240506_63')->firstOrFail();
+        $this->assertSame($user->id, $po->user_id);
 
         $this->getJson("/api/purchase-orders/{$po->id}")
             ->assertOk()
@@ -205,8 +208,8 @@ class PurchaseOrderApiTest extends TestCase
 
     public function test_lookups_accept_document_numbers_with_slashes(): void
     {
-        $this->actAsUser();
-        PurchaseOrder::factory()->create(['no_do' => 'SJ/MKM/0042', 'no_po' => 'PO/2026/10/001']);
+        $user = $this->actAsUser();
+        PurchaseOrder::factory()->create(['no_do' => 'SJ/MKM/0042', 'no_po' => 'PO/2026/10/001', 'user_id' => $user->id]);
 
         $this->getJson('/api/purchase-orders/by-do/'.rawurlencode('SJ/MKM/0042'))
             ->assertOk()
@@ -258,6 +261,40 @@ class PurchaseOrderApiTest extends TestCase
         $response->assertStatus(422)
             ->assertJsonValidationErrors(['no_do', 'nama_supplier', 'status_penerimaan', 'foto_do', 'foto_penerimaan'])
             ->assertJsonMissingValidationErrors(['no_po', 'foto_resi', 'no_resi']);
+    }
+
+    public function test_warehouse_staff_only_sees_their_own_purchase_orders(): void
+    {
+        $otherStaff = User::factory()->create();
+        $otherOrder = PurchaseOrder::factory()->create(['no_do' => 'DO-LAIN-001', 'no_po' => 'PO-LAIN-001', 'user_id' => $otherStaff->id]);
+
+        $user = $this->actAsUser();
+        $ownOrder = PurchaseOrder::factory()->create(['no_do' => 'DO-SENDIRI-001', 'user_id' => $user->id]);
+
+        $this->getJson('/api/purchase-orders')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.no_do', $ownOrder->no_do);
+
+        $this->getJson("/api/purchase-orders/{$ownOrder->id}")->assertOk();
+        $this->getJson("/api/purchase-orders/{$otherOrder->id}")->assertNotFound();
+        $this->getJson('/api/purchase-orders/by-do/DO-LAIN-001')->assertNotFound();
+        $this->getJson('/api/purchase-orders/by-po/PO-LAIN-001')->assertNotFound();
+    }
+
+    public function test_super_admin_sees_every_purchase_order(): void
+    {
+        $staff = User::factory()->create();
+        $order = PurchaseOrder::factory()->create(['no_do' => 'DO-STAFF-001', 'user_id' => $staff->id]);
+        PurchaseOrder::factory()->create();
+
+        $admin = User::factory()->create();
+        $admin->assignRole(Role::findOrCreate('super_admin', 'web'));
+        $this->actingAs($admin, 'sanctum');
+
+        $this->getJson('/api/purchase-orders')->assertOk()->assertJsonCount(2, 'data');
+        $this->getJson("/api/purchase-orders/{$order->id}")->assertOk();
+        $this->getJson('/api/purchase-orders/by-do/DO-STAFF-001')->assertOk();
     }
 
     private function actAsUser(): User

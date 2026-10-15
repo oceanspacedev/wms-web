@@ -38,6 +38,7 @@ class PurchaseOrderApiController extends Controller
             ?? $request->user()?->username;
 
         $poData = [
+            'user_id' => $request->user()->id,
             'no_po' => filled($validated['no_po'] ?? null) ? trim($validated['no_po']) : null,
             'no_do' => trim($validated['no_do']),
             'tanggal_do' => $validated['tanggal_do'] ?? null,
@@ -76,14 +77,14 @@ class PurchaseOrderApiController extends Controller
 
     #[Endpoint(
         title: 'Daftar purchase order',
-        description: 'Mengembalikan halaman PurchaseOrderResource. Filter search (no_po, no_do, no_resi, nama_supplier) dan status_penerimaan.',
+        description: 'Mengembalikan halaman PurchaseOrderResource milik user yang login (super admin melihat semua). Filter search (no_po, no_do, no_resi, nama_supplier) dan status_penerimaan.',
     )]
     #[QueryParameter('search', 'Cari no_po, no_do, no_resi, atau nama_supplier.', type: 'string')]
     #[QueryParameter('status_penerimaan', 'Lengkap, Kurang, atau Rusak.', type: 'string')]
     #[QueryParameter('per_page', 'Jumlah item per halaman, maksimum 100.', type: 'integer')]
     public function index(Request $request): AnonymousResourceCollection
     {
-        $query = PurchaseOrder::query();
+        $query = PurchaseOrder::query()->visibleTo($request->user());
 
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();
@@ -110,8 +111,10 @@ class PurchaseOrderApiController extends Controller
         title: 'Detail penerimaan purchase order by ID',
         description: 'Mengembalikan satu PurchaseOrderResource. Dipakai aplikasi karena no_po bisa masih kosong.',
     )]
-    public function show(PurchaseOrder $purchaseOrder): PurchaseOrderResource
+    public function show(Request $request, PurchaseOrder $purchaseOrder): PurchaseOrderResource
     {
+        abort_unless($purchaseOrder->isVisibleTo($request->user()), 404);
+
         return new PurchaseOrderResource($purchaseOrder);
     }
 
@@ -119,23 +122,26 @@ class PurchaseOrderApiController extends Controller
         title: 'Cari purchase order by nomor PO',
         description: 'Lookup `no_po`. Response `data` PurchaseOrderResource, atau 404 jika tidak ada.',
     )]
-    public function findByNoPo(string $noPo): JsonResponse
+    public function findByNoPo(Request $request, string $noPo): JsonResponse
     {
-        return $this->findOrder('no_po', $noPo, 'Purchase Order');
+        return $this->findOrder($request, 'no_po', $noPo, 'Purchase Order');
     }
 
     #[Endpoint(
         title: 'Cari purchase order by nomor DO',
         description: 'Lookup `no_do` (DO / surat jalan supplier). Response `data` PurchaseOrderResource, atau 404 jika tidak ada.',
     )]
-    public function findByNoDo(string $noDo): JsonResponse
+    public function findByNoDo(Request $request, string $noDo): JsonResponse
     {
-        return $this->findOrder('no_do', $noDo, 'DO');
+        return $this->findOrder($request, 'no_do', $noDo, 'DO');
     }
 
-    private function findOrder(string $column, string $value, string $label): JsonResponse
+    private function findOrder(Request $request, string $column, string $value, string $label): JsonResponse
     {
-        $order = PurchaseOrder::query()->where($column, trim($value))->first();
+        $order = PurchaseOrder::query()
+            ->visibleTo($request->user())
+            ->where($column, trim($value))
+            ->first();
 
         if (! $order) {
             return response()->json([

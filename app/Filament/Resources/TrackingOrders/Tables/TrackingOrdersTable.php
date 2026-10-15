@@ -2,7 +2,7 @@
 
 namespace App\Filament\Resources\TrackingOrders\Tables;
 
-use App\Models\TrackingOrder;
+use App\Filament\Resources\TrackingOrders\TrackingOrderResource;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -93,7 +93,7 @@ class TrackingOrdersTable
             ->filters([
                 SelectFilter::make('nama_pengirim')
                     ->label('Filter Driver / Pengirim')
-                    ->options(fn () => TrackingOrder::whereNotNull('nama_pengirim')->where('nama_pengirim', '!=', '')->distinct()->pluck('nama_pengirim', 'nama_pengirim')->toArray()),
+                    ->options(fn () => TrackingOrderResource::getEloquentQuery()->whereNotNull('nama_pengirim')->where('nama_pengirim', '!=', '')->distinct()->pluck('nama_pengirim', 'nama_pengirim')->toArray()),
             ])
             ->recordActions([
                 ViewAction::make(),

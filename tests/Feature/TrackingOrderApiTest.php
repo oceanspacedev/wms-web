@@ -22,8 +22,9 @@ class TrackingOrderApiTest extends TestCase
 
     public function test_can_list_tracking_orders_and_filter_by_courier(): void
     {
-        $this->actAsCourier();
+        $courier = $this->actAsCourier();
         $this->seed(TrackingOrderSeeder::class);
+        TrackingOrder::query()->update(['user_id' => $courier->id]);
 
         $response = $this->getJson('/api/tracking-orders?kurir=Heidy');
 
@@ -61,8 +62,9 @@ class TrackingOrderApiTest extends TestCase
 
     public function test_can_find_tracking_order_by_surat_jalan_barcode(): void
     {
-        $this->actAsCourier();
+        $courier = $this->actAsCourier();
         $this->seed(TrackingOrderSeeder::class);
+        TrackingOrder::query()->update(['user_id' => $courier->id]);
 
         $order = TrackingOrder::firstOrFail();
 
@@ -79,8 +81,8 @@ class TrackingOrderApiTest extends TestCase
 
     public function test_lookup_by_sj_accepts_numbers_with_slashes(): void
     {
-        $this->actAsCourier();
-        TrackingOrder::create(['no_sj' => 'SJ/CRB/0007', 'nama_dealer' => 'Toko']);
+        $courier = $this->actAsCourier();
+        TrackingOrder::create(['no_sj' => 'SJ/CRB/0007', 'nama_dealer' => 'Toko', 'user_id' => $courier->id]);
 
         $this->getJson('/api/tracking-orders/by-sj/'.rawurlencode('SJ/CRB/0007'))
             ->assertOk()
@@ -114,7 +116,7 @@ class TrackingOrderApiTest extends TestCase
 
     public function test_courier_records_every_column_in_one_request_at_the_receiving_point(): void
     {
-        $this->actAsCourier();
+        $courier = $this->actAsCourier();
         Storage::fake('public');
 
         $payload = [
@@ -155,6 +157,7 @@ class TrackingOrderApiTest extends TestCase
             ->assertJsonMissingPath('data.status');
 
         $order = TrackingOrder::where('no_sj', 'SJ-MOBILE-NEW-999')->firstOrFail();
+        $this->assertSame($courier->id, $order->user_id);
         $this->assertSame('Ibu Siti (Kepala Toko)', $order->nama_penerima);
         $this->assertSame('2026-10-01', $order->tanggal_nota->toDateString());
         $this->assertEquals(-6.917464, $order->latitude);
@@ -216,6 +219,65 @@ class TrackingOrderApiTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonValidationErrors(['no_sj', 'nama_dealer', 'nama_penerima', 'foto_nota_sj', 'foto_penerima']);
+    }
+
+    public function test_courier_only_sees_their_own_tracking_orders(): void
+    {
+        $otherCourier = User::factory()->create(['name' => 'Kurir Lain']);
+        $otherOrder = TrackingOrder::create([
+            'no_sj' => 'SJ-LAIN-001',
+            'nama_dealer' => 'Toko Lain',
+            'nama_pengirim' => 'Kurir Lain',
+            'tanggal_pengiriman' => now()->toDateString(),
+            'user_id' => $otherCourier->id,
+        ]);
+
+        $courier = $this->actAsCourier();
+        $ownOrder = TrackingOrder::create([
+            'no_sj' => 'SJ-SENDIRI-001',
+            'nama_dealer' => 'Toko Sendiri',
+            'nama_pengirim' => $courier->name,
+            'nama_penerima' => 'Penerima',
+            'tanggal_pengiriman' => now()->toDateString(),
+            'user_id' => $courier->id,
+        ]);
+
+        $this->getJson('/api/tracking-orders')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.no_sj', $ownOrder->no_sj);
+
+        $this->getJson("/api/tracking-orders/{$ownOrder->id}")->assertOk();
+        $this->getJson("/api/tracking-orders/{$otherOrder->id}")->assertNotFound();
+        $this->getJson('/api/tracking-orders/by-sj/SJ-LAIN-001')->assertNotFound();
+
+        $this->getJson('/api/courier/drivers')
+            ->assertOk()
+            ->assertJsonPath('data', [$courier->name]);
+
+        $this->getJson('/api/courier/summary?kurir=Kurir Lain')
+            ->assertOk()
+            ->assertJsonPath('data.total_assigned', 0);
+
+        $this->getJson('/api/courier/summary')
+            ->assertOk()
+            ->assertJsonPath('data.total_assigned', 1)
+            ->assertJsonPath('data.total_delivered', 1);
+    }
+
+    public function test_super_admin_sees_every_tracking_order(): void
+    {
+        $courier = User::factory()->create();
+        $order = TrackingOrder::create(['no_sj' => 'SJ-KURIR-001', 'nama_dealer' => 'Toko', 'user_id' => $courier->id]);
+        TrackingOrder::create(['no_sj' => 'SJ-TANPA-PEMILIK', 'nama_dealer' => 'Toko']);
+
+        $admin = User::factory()->create();
+        $admin->assignRole(Role::findOrCreate('super_admin', 'web'));
+        $this->actingAs($admin, 'sanctum');
+
+        $this->getJson('/api/tracking-orders')->assertOk()->assertJsonCount(2, 'data');
+        $this->getJson("/api/tracking-orders/{$order->id}")->assertOk();
+        $this->getJson('/api/tracking-orders/by-sj/SJ-KURIR-001')->assertOk();
     }
 
     private function actAsCourier(): User

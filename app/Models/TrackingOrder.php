@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasOwner;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class TrackingOrder extends Model
 {
-    use HasFactory;
+    use HasFactory, HasOwner;
 
     /**
      * The attributes that are mass assignable.
@@ -15,6 +16,7 @@ class TrackingOrder extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'user_id',
         'no_sj',
         'nama_dealer',
         'alamat_dealer',
@@ -39,6 +41,7 @@ class TrackingOrder extends Model
     protected function casts(): array
     {
         return [
+            'user_id' => 'integer',
             'tanggal_nota' => 'date',
             'tanggal_pengiriman' => 'date',
             'jumlah_value_nota' => 'decimal:2',
