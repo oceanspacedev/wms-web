@@ -3,10 +3,8 @@
 namespace App\Filament\Resources\CsaShipments\Schemas;
 
 use Filament\Forms\Components\DatePicker;
-use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Schema;
 
 class CsaShipmentForm
@@ -29,6 +27,7 @@ class CsaShipmentForm
                     ->required(),
                 TextInput::make('nama_gudang'),
                 TextInput::make('target_sheet')
+                    ->label('Cabang')
                     ->required(),
                 TextInput::make('tujuan_dealer'),
                 Textarea::make('alamat_kirim')
@@ -63,13 +62,6 @@ class CsaShipmentForm
                 TextInput::make('status_pengiriman'),
                 DatePicker::make('tanggal_diterima'),
                 Textarea::make('ket_isi_unit')
-                    ->columnSpanFull(),
-                Toggle::make('is_synced')
-                    ->required(),
-                Toggle::make('already_in_sheet')
-                    ->label('Data yang sama sudah ada di sheet (dilewati)'),
-                DateTimePicker::make('synced_at'),
-                Textarea::make('sync_error')
                     ->columnSpanFull(),
             ]);
     }

@@ -27,7 +27,7 @@ class WarehouseMappingResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Logistik & Ekspedisi';
 
-    protected static ?string $navigationLabel = 'Pemetaan Gudang ke Sheet';
+    protected static ?string $navigationLabel = 'Pemetaan Gudang ke Cabang';
 
     protected static ?string $modelLabel = 'Pemetaan Gudang';
 
@@ -51,7 +51,7 @@ class WarehouseMappingResource extends Resource
                     ->columnSpanFull(),
 
                 TextInput::make('target_sheet')
-                    ->label('Target Tab Sheet di Google Spreadsheet')
+                    ->label('Cabang di Data Pengiriman')
                     ->placeholder('Contoh: CIREBON, BANDUNG, JAKARTA PIK')
                     ->required()
                     ->columnSpanFull(),
@@ -79,7 +79,7 @@ class WarehouseMappingResource extends Resource
                     ->sortable(),
 
                 TextColumn::make('target_sheet')
-                    ->label('Target Sheet')
+                    ->label('Cabang')
                     ->badge()
                     ->color('primary')
                     ->searchable()

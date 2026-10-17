@@ -18,7 +18,7 @@ use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
-#[Fillable(['name', 'username', 'email', 'email_verified_at', 'password', 'whatsapp_number', 'whatsapp_verified_at', 'avatar_url', 'kode_gudang_arsip'])]
+#[Fillable(['name', 'username', 'email', 'email_verified_at', 'password', 'whatsapp_number', 'whatsapp_verified_at', 'avatar_url', 'kode_gudang_arsip', 'cabang'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser, HasAvatar
 {
@@ -94,6 +94,18 @@ class User extends Authenticatable implements FilamentUser, HasAvatar
     public function isWarehouseStaff(): bool
     {
         return $this->hasRole('gudang') && ! $this->hasRole('super_admin');
+    }
+
+    /**
+     * Cabang Data Pengiriman yang boleh dilihat & diisi akun ini; null berarti semua cabang.
+     */
+    public function cabangScope(): ?string
+    {
+        if (blank($this->cabang) || $this->hasRole('super_admin')) {
+            return null;
+        }
+
+        return trim($this->cabang);
     }
 
     public function getFilamentAvatarUrl(): ?string

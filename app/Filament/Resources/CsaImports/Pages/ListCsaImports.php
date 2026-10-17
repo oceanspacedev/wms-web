@@ -40,8 +40,8 @@ class ListCsaImports extends ListRecords
                         'total_synced' => 0,
                     ]);
 
-                    // Upload hanya menyimpan file; ekstraksi (dan sinkron) berjalan di antrean agar request tidak timeout
-                    ProcessCsaImportJob::dispatch($record, (bool) ($data['auto_sync'] ?? false));
+                    // Upload hanya menyimpan file; ekstraksi berjalan di antrean agar request tidak timeout
+                    ProcessCsaImportJob::dispatch($record);
 
                     return $record;
                 })

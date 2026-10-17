@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Users\Schemas;
 
 use App\Models\User;
+use App\Support\ShipmentOptions;
 use App\Support\WhatsAppNumber;
 use Closure;
 use Filament\Forms\Components\FileUpload;
@@ -148,6 +149,13 @@ class UserForm
                                 ->placeholder('GDG-BDG-01')
                                 ->maxLength(50)
                                 ->helperText('Untuk akun petugas gudang (role "gudang" + "panel_user"). Menentukan PO di SCM Arsip yang bisa dikirimi Memo/DO.'),
+
+                            Select::make('cabang')
+                                ->label('Cabang Data Pengiriman')
+                                ->placeholder('Semua cabang')
+                                ->options(fn (): array => ShipmentOptions::cabang())
+                                ->searchable()
+                                ->helperText('Untuk admin cabang: hanya melihat & mengisi Data Pengiriman cabang ini. Kosongkan untuk admin pusat.'),
                         ]),
                 ])
                     ->columnSpan(['lg' => 1]),

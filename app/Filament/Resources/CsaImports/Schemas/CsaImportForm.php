@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\CsaImports\Schemas;
 
-use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\FileUpload;
 use Filament\Schemas\Schema;
 
@@ -24,12 +23,7 @@ class CsaImportForm
                     ])
                     ->required()
                     ->maxSize(102400)
-                    ->helperText('File disimpan dulu, lalu diekstrak di belakang layar. Status di tabel diperbarui otomatis.'),
-
-                Checkbox::make('auto_sync')
-                    ->label('Otomatis Sinkronkan ke Google Spreadsheet')
-                    ->helperText('Jika dicentang, setelah file selesai diekstrak data dikirim bertahap ke Google Spreadsheet cabang, juga di belakang layar.')
-                    ->default(true),
+                    ->helperText('File disimpan dulu, lalu diekstrak di belakang layar ke menu Data Pengiriman. Status di tabel diperbarui otomatis.'),
             ]);
     }
 }

@@ -69,7 +69,6 @@ class CsaImportModalTest extends TestCase
         Livewire::test(ListCsaImports::class)
             ->callAction('create', [
                 'excel_file' => $fakeFile,
-                'auto_sync' => true,
             ])
             ->assertHasNoActionErrors()
             ->assertNotified('File berhasil diunggah');
@@ -79,8 +78,9 @@ class CsaImportModalTest extends TestCase
             'status' => 'pending',
         ]);
 
+        // Data hanya masuk ke web (Data Pengiriman), tidak lagi dikirim ke Google Spreadsheet
         Queue::assertPushed(ProcessCsaImportJob::class, function (ProcessCsaImportJob $job): bool {
-            return $job->autoSyncToSheet === true;
+            return $job->autoSyncToSheet === false;
         });
 
         // Upload tidak lagi memproses/menyinkronkan di dalam request

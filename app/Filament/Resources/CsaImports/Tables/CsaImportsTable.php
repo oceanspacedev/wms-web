@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\CsaImports\Tables;
 
 use App\Jobs\ProcessCsaImportJob;
-use App\Jobs\SyncToGoogleSheetJob;
 use App\Models\CsaImport;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -11,8 +10,6 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -61,15 +58,24 @@ class CsaImportsTable
                     ->label('Total SJ')
                     ->numeric()
                     ->formatStateUsing(fn ($state) => number_format((int) $state, 0, ',', '.'))
-                    ->sortable(),
+                    ->description(function ($record): ?string {
+                        if ($record->status !== 'completed' || ($record->total_updated === 0 && $record->total_skipped === 0)) {
+                            return null;
+                        }
 
-                TextColumn::make('total_synced')
-                    ->label('SJ Tersinkron')
-                    ->state(fn ($record) => $record->shipments()->where('is_synced', true)->count())
-                    ->numeric()
-                    ->formatStateUsing(fn ($state) => number_format((int) $state, 0, ',', '.'))
-                    ->sortable()
-                    ->color(fn ($state, $record) => $state >= $record->total_shipments && $record->total_shipments > 0 ? 'success' : ($state > 0 ? 'info' : 'gray')),
+                        $parts = [number_format($record->total_new, 0, ',', '.').' baru'];
+
+                        if ($record->total_updated > 0) {
+                            $parts[] = number_format($record->total_updated, 0, ',', '.').' diperbarui';
+                        }
+
+                        if ($record->total_skipped > 0) {
+                            $parts[] = number_format($record->total_skipped, 0, ',', '.').' sudah ada';
+                        }
+
+                        return implode(' · ', $parts);
+                    })
+                    ->sortable(),
 
                 TextColumn::make('created_at')
                     ->label('Tanggal Upload')
@@ -77,51 +83,11 @@ class CsaImportsTable
                     ->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
-            // Ekstraksi & sinkron berjalan di antrean, jadi status dan jumlah SJ tersinkron perlu diperbarui berkala
+            // Ekstraksi berjalan di antrean, jadi status dan jumlah SJ perlu diperbarui berkala
             ->poll('10s')
             ->recordActions([
                 ActionGroup::make([
                     ViewAction::make(),
-
-                    Action::make('syncToSheets')
-                        ->label('Kirim ke Sheet')
-                        ->icon('heroicon-o-cloud-arrow-up')
-                        ->color('success')
-                        ->visible(fn (CsaImport $record): bool => $record->status === 'completed' && $record->total_shipments > 0)
-                        ->schema(fn (CsaImport $record): array => [
-                            TextInput::make('webhook_url')
-                                ->label('Google Apps Script Webhook URL')
-                                ->default(config('services.google_sheets.webhook_url') ?: '')
-                                ->required()
-                                ->helperText('URL Web App dari deployment Google Apps Script spreadsheet Anda'),
-
-                            Select::make('target_sheet')
-                                ->label('Target Sheet Cabang')
-                                ->placeholder('Semua Cabang / Sheet Sekaligus')
-                                ->options(function () use ($record) {
-                                    if (empty($record->summary_by_sheet)) {
-                                        return [];
-                                    }
-                                    $options = [];
-                                    foreach ($record->summary_by_sheet as $sheet => $stats) {
-                                        $options[$sheet] = "{$sheet} ({$stats['total_sj']} SJ)";
-                                    }
-
-                                    return $options;
-                                }),
-                        ])
-                        ->action(function (CsaImport $record, array $data): void {
-                            $targetSheet = $data['target_sheet'] ?? null;
-                            $webhookUrl = $data['webhook_url'];
-
-                            SyncToGoogleSheetJob::dispatch($record, $targetSheet, $webhookUrl);
-
-                            Notification::make()
-                                ->title('Sinkronisasi Berjalan di Belakang Layar')
-                                ->body('Data dikirim bertahap ke Google Spreadsheet. Progres terlihat di kolom SJ Tersinkron.')
-                                ->info()
-                                ->send();
-                        }),
 
                     // Hanya untuk import yang belum berhasil: ekstraksi ulang import "Selesai" akan menggandakan data SJ
                     Action::make('reprocess')

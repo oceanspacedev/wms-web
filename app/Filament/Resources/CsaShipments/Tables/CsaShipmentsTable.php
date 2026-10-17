@@ -6,10 +6,8 @@ use App\Models\CsaShipment;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
-use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 
 class CsaShipmentsTable
@@ -31,7 +29,7 @@ class CsaShipmentsTable
                     ->sortable(),
 
                 TextColumn::make('target_sheet')
-                    ->label('Depo / Sheet')
+                    ->label('Cabang')
                     ->badge()
                     ->color('primary')
                     ->sortable()
@@ -76,20 +74,6 @@ class CsaShipmentsTable
                     ->copyable()
                     ->searchable(),
 
-                IconColumn::make('is_synced')
-                    ->label('Synced')
-                    ->boolean()
-                    ->trueIcon(fn (CsaShipment $record): string => $record->already_in_sheet ? 'heroicon-o-document-duplicate' : 'heroicon-o-check-circle')
-                    ->falseIcon('heroicon-o-clock')
-                    ->trueColor(fn (CsaShipment $record): string => $record->already_in_sheet ? 'info' : 'success')
-                    ->falseColor('warning')
-                    ->tooltip(fn (CsaShipment $record): string => match (true) {
-                        ! $record->is_synced => 'Belum terkirim ke sheet',
-                        $record->already_in_sheet => 'Data yang sama (No SJ & total nominal) sudah ada di sheet, dilewati & tidak ditimpa',
-                        default => 'Ditulis ke sheet',
-                    })
-                    ->sortable(),
-
                 TextColumn::make('reff_note')
                     ->label('Reff Note')
                     ->searchable()
@@ -109,22 +93,12 @@ class CsaShipmentsTable
             ->defaultSort('tanggal_kirim', 'desc')
             ->filters([
                 SelectFilter::make('target_sheet')
-                    ->label('Filter Depo / Sheet')
+                    ->label('Filter Cabang')
                     ->options(fn () => CsaShipment::distinct()->pluck('target_sheet', 'target_sheet')->toArray()),
 
                 SelectFilter::make('brand')
                     ->label('Filter Brand')
                     ->options(fn () => CsaShipment::whereNotNull('brand')->where('brand', '!=', '')->distinct()->pluck('brand', 'brand')->toArray()),
-
-                TernaryFilter::make('is_synced')
-                    ->label('Status Sinkronisasi')
-                    ->trueLabel('Sudah Terkirim ke Sheet')
-                    ->falseLabel('Belum Terkirim ke Sheet'),
-
-                TernaryFilter::make('already_in_sheet')
-                    ->label('Data Sama Sudah Ada di Sheet')
-                    ->trueLabel('Ya, dilewati (tidak ditimpa)')
-                    ->falseLabel('Tidak, ditulis baru'),
             ])
             ->recordActions([
                 EditAction::make(),

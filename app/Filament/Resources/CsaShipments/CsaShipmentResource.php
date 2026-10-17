@@ -2,18 +2,21 @@
 
 namespace App\Filament\Resources\CsaShipments;
 
-use App\Filament\Resources\CsaShipments\Pages\CreateCsaShipment;
-use App\Filament\Resources\CsaShipments\Pages\EditCsaShipment;
 use App\Filament\Resources\CsaShipments\Pages\ListCsaShipments;
-use App\Filament\Resources\CsaShipments\Schemas\CsaShipmentForm;
-use App\Filament\Resources\CsaShipments\Tables\CsaShipmentsTable;
+use App\Filament\Resources\CsaShipments\Schemas\DataPengirimanForm;
+use App\Filament\Resources\CsaShipments\Tables\DataPengirimanTable;
 use App\Models\CsaShipment;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
+/**
+ * Data Pengiriman: pengganti spreadsheet "Update Pengiriman" per cabang.
+ * Baris dari upload CSA masuk otomatis; admin cabang melengkapi ekspedisi, resi, status, dll.
+ */
 class CsaShipmentResource extends Resource
 {
     protected static ?string $model = CsaShipment::class;
@@ -22,39 +25,40 @@ class CsaShipmentResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Logistik & Ekspedisi';
 
-    protected static bool $shouldRegisterNavigation = false;
+    protected static ?string $navigationLabel = 'Data Pengiriman';
 
-    protected static ?string $navigationLabel = 'Surat Jalan Pengiriman';
+    protected static ?string $modelLabel = 'Data Pengiriman';
 
-    protected static ?string $modelLabel = 'Pengiriman SJ';
+    protected static ?string $pluralModelLabel = 'Data Pengiriman';
 
-    protected static ?string $pluralModelLabel = 'Data Pengiriman SJ';
+    protected static ?string $slug = 'data-pengiriman';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     public static function form(Schema $schema): Schema
     {
-        return CsaShipmentForm::configure($schema);
+        return DataPengirimanForm::configure($schema);
     }
 
     public static function table(Table $table): Table
     {
-        return CsaShipmentsTable::configure($table);
+        return DataPengirimanTable::configure($table);
     }
 
-    public static function getRelations(): array
+    /**
+     * Admin cabang hanya bisa melihat & mengisi data cabangnya sendiri.
+     *
+     * @return Builder<CsaShipment>
+     */
+    public static function getEloquentQuery(): Builder
     {
-        return [
-            //
-        ];
+        return parent::getEloquentQuery()->visibleTo(auth()->user());
     }
 
     public static function getPages(): array
     {
         return [
             'index' => ListCsaShipments::route('/'),
-            'create' => CreateCsaShipment::route('/create'),
-            'edit' => EditCsaShipment::route('/{record}/edit'),
         ];
     }
 }

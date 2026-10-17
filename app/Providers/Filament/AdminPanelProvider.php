@@ -47,6 +47,8 @@ class AdminPanelProvider extends PanelProvider
             ->profile(EditProfile::class, isSimple: false)
             ->registration(null)
             ->passwordReset(null)
+            // Notifikasi lonceng untuk proses di belakang layar (mis. import spreadsheet Data Pengiriman)
+            ->databaseNotifications()
             ->renderHook(
                 PanelsRenderHook::AUTH_LOGIN_FORM_AFTER,
                 fn () => view('auth.login-extra'),

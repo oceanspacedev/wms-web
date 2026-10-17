@@ -21,6 +21,9 @@ class CsaImport extends Model
         'status',
         'total_raw_rows',
         'total_shipments',
+        'total_new',
+        'total_updated',
+        'total_skipped',
         'total_synced',
         'error_message',
         'summary_by_sheet',
@@ -32,6 +35,9 @@ class CsaImport extends Model
     protected $casts = [
         'total_raw_rows' => 'integer',
         'total_shipments' => 'integer',
+        'total_new' => 'integer',
+        'total_updated' => 'integer',
+        'total_skipped' => 'integer',
         'total_synced' => 'integer',
         'summary_by_sheet' => 'array',
     ];

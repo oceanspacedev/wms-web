@@ -125,11 +125,13 @@ class XlsxReader
             $cells['_row'] = $rowMatch[1];
         }
 
-        preg_match_all('/<c\b([^>]*)>(.*?)<\/c>/s', $rowXml, $matches, PREG_SET_ORDER);
+        // Sel kosong bisa ditulis self-closing (<c r="J2" s="22"/>, umum di export Google Sheets);
+        // tanpa alternatif "/>" isinya akan terambil dari sel berikutnya.
+        preg_match_all('/<c\b([^>]*?)(?:\/>|>(.*?)<\/c>)/s', $rowXml, $matches, PREG_SET_ORDER);
 
         foreach ($matches as $match) {
             $attributes = $match[1];
-            $inner = $match[2];
+            $inner = $match[2] ?? '';
 
             if (! preg_match('/\br="([A-Z]+)\d+"/', $attributes, $refMatch)) {
                 continue;

@@ -1,0 +1,100 @@
+<?php
+
+/*
+| Data Pengiriman (pengganti spreadsheet "Update Pengiriman").
+|
+| 'tabs'    : urutan tab cabang persis seperti di spreadsheet.
+| 'options' : pilihan dropdown per tab, diambil dari validasi data di spreadsheet (judul kolom yang ikut
+|             masuk daftar dan duplikat sudah dibuang). Kolom tanpa dropdown di suatu tab memakai gabungan
+|             pilihan semua tab. Nilai di luar daftar tetap bisa diketik lewat form "Lengkapi".
+*/
+
+return [
+    'tabs' => ['CIREBON', 'JAKARTA PIK', 'RETUR', 'ACC CIREBON TP', 'JAKARTA PC', 'BANDUNG', 'PURWOKERTO', 'SEMARANG', 'SURABAYA', 'MANADO', 'PALU', 'MAKASSAR', 'BENGKULU', 'PEKANBARU', 'MEDAN', 'LAMPUNG', 'PADANG', 'PALEMBANG', 'JAMBI'],
+
+    'options' => [
+        'CIREBON' => [
+            'nama_ekspedisi' => ['21 EXPRESS', 'DIAMBIL TOKO', 'INTERNAL', 'KARYA MANDIRI', 'RAX', 'SENTRAL CARGO', 'J&T', 'KURIR/DRIVER'],
+            'status_pembayaran' => ['TAGIHAN BULANAN', 'SUDAH DIBAYAR DIDEPO', 'ONGKIR DI TOKO'],
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR', 'CV. MAJU TECNOLOGI', 'PT. COMPLETE SOLUSI NUSANTARA', 'PT. RETAIL INDONESIA SELALU MAJU', 'CV. COMPLETE SELULAR INDONESIA', 'PT. MEDIA SELULA INDONESIA', 'PT. MEDIA SELULAR IDNONESIA', 'PT. SATU M"&"EDIA INDONESIA'],
+        ],
+        'JAKARTA PIK' => [
+            'nama_ekspedisi' => ['21 EXPRESS', 'AUP', 'GRAB', 'J&T', 'KARYA MANDIRI', 'RAX', 'SENTRAL CARGO', 'KURIR/DRIVER'],
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR', 'PT. SATU MEDIA INDONESIA'],
+        ],
+        'RETUR' => [
+            'nama_ekspedisi' => ['21 EXPRESS', 'DIAMBIL TOKO', 'INTERNAL', 'KARYA MANDIRI', 'RAX', 'SENTRAL CARGO', 'J&T', 'KURIR/DRIVER'],
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR', 'CV. MAJU TECNOLOGI', 'PT. COMPLETE SOLUSI NUSANTARA', 'PT. RETAIL INDONESIA SELALU MAJU'],
+        ],
+        'ACC CIREBON TP' => [
+            'badan_usaha' => ['CV. COMPLETE SELULAR', 'CV. TOP SELULAR', 'PT. SATU MEDIA INDONESIA', 'CV. MAJU TECNOLOGI', 'PT. COMPLETE SOLUSI NUSANTARA', 'PT. MEDIA SELULAR INDONESIA', 'PT. RETAIL INDONESIA SELALU MAJU', 'CV. COMPLETE SELULAR INDONESIA', 'PT. MEDIA SELULA INDONESIA', 'PT. MEDIA SELULAR IDNONESIA', 'PT. SATU M"&"EDIA INDONESIA'],
+            'nama_ekspedisi' => ['21 EXPRESS', 'DIAMBIL TOKO', 'INTERNAL', 'KARYA MANDIRI', 'RAX', 'SENTRAL CARGO', 'J&T', 'KURIR/DRIVER', 'DRIVER', 'FREE', 'J&T EXPRESS', 'RAX CARGO', 'SALES'],
+            'status_pembayaran' => ['TAGIHAN BULANAN', 'SUDAH DIBAYAR DIDEPO', 'ONGKIR DI TOKO'],
+        ],
+        'JAKARTA PC' => [
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR', 'PT. MEDIA SELULER INDONESIA', 'PT.SATU MEDIA INDONESIA', 'TOP SELULAR'],
+        ],
+        'BANDUNG' => [
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR', 'CV. MAJU TEKNOLOGI'],
+            'nama_ekspedisi' => ['21 EXPRESS', 'J&T', 'KURIR/DRIVER', 'RAX'],
+        ],
+        'PURWOKERTO' => [
+            'brand' => ['REALME', 'ITEL', 'SAMSUNG', 'XIAOMI', 'DOKUMEN', 'VILLAON', 'IPHONE', 'HONOR', 'MOTOROLA'],
+            'badan_usaha' => ['CV. TOP SELULAR', 'PT. MEDIA SELULAR INDONESIA', 'CV COMPLETE SELULAR', 'PT. RETAIL INDONESIA SELALU MAJU', 'CV. COMPLETE SELULAR'],
+            'ketentuan_biaya_kirim' => ['INVOICE', 'KLAIM BENSIN', 'DFOD', '-'],
+            'nama_ekspedisi' => ['J&T EXPRESS', 'SENTRAL CARGO', 'WIDHI UTAMA', 'AMBIL KANTOR', '21 EXPRESS', 'DRIVER INTERNAL', 'TRAVEL', 'SALES', 'ADMIN', 'KARYA MANDIRI'],
+            'status_pembayaran' => ['TAGIHAN BULANAN', 'BAYAR DI TOKO', '-', 'CASH', 'BIAYA PETTY CASH'],
+        ],
+        'SEMARANG' => [
+            'badan_usaha' => ['CV. TOP SELLULAR', 'PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR'],
+            'nama_ekspedisi' => ['21 EXPRESS', '21 EXPRESS DP', 'DI AMBIL TOKO', 'DRIVER/KURIR', 'SENTRAL CARGO', 'J&T', 'KARYA MANDIRI', 'MAXIM', 'WIDHI UTAMA'],
+        ],
+        'SURABAYA' => [
+            'badan_usaha' => ['CV. MAJU TECNOLOGI', 'CV. TOP SELULAR', 'PT. MEDIA SELULAR INDONESIA', 'CV. COMPLETE SELULAR'],
+            'nama_ekspedisi' => ['21 EXPRESS', 'DELIVEREE+RIZKI', 'GINTA CARGO', 'GRAB EXPRESS', 'J&T', 'DIAMBIL TOKO', 'KURIR/DRIVER', 'SALES'],
+        ],
+        'MANADO' => [
+            'nama_kota' => ['MANADO', 'MONGONDOW', 'MAKASSAR', 'GORONTALO', 'TONDANO'],
+            'status_pembayaran' => ['-', 'TAGIHAN BULANAN'],
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR'],
+            'nama_ekspedisi' => ['KURIR', '21 EXPRESS', 'ADMIN', 'JNT EXPRESS'],
+        ],
+        'PALU' => [
+            'brand' => ['MOTOROLA', 'VILLAON', 'DOKUMEN', 'MOTOPAD', 'LAPTOP ASUS'],
+            'nama_kota' => ['PALOPO', 'GOWA', 'LUWU TIMUR', 'SINJAI', 'PALU', 'SIDENRENG RAPPANG', 'KENDARI', 'PINRANG', 'LUWU UTARA', 'WAJO', 'JAKARTA', 'PARE PARE', 'BAUBAU', 'BUTON TENGAH', 'SOPPENG', 'KONAWE', 'LUWU', 'CIREBON', 'MAKASAR', 'KOLAKA UTARA', 'WAKATOBI', 'BANTAENG', 'SIDRAP', 'TORAJA UTARA', 'MAMASA', 'MANADO', 'ENREKANG', 'JENEPONTO', 'BONE', '"&"MAROS', 'AMBON', 'POLEWALI MANDAR', 'KEPULAUAN SELAYAR', 'TAKALAR', 'BULUKUMBA', 'SURABAYA', 'LUWUK', 'MUOTONG', 'MOROWALI', 'PARIGI', 'BUOL', 'GORONTALO', 'TOLI TOLI', 'BANGGAI', 'SIGI', 'DONGGALA', 'TOMOHON', 'PARIGI MUOTONG', 'PURWAKARTA', 'MAMUJU', 'POSO', 'TOJO UNA-UNA', 'PALEMBANG'],
+            'status_pembayaran' => ['TAGIHAN BULANAN', 'SUDAH DIBAYAR DIDEPO', 'ONGKIR DI TOKO', 'COLLECT', 'ISI BENSIN', 'INTERNAL', 'DIAMBIL TOKO', 'DFOD', 'DIBAYAR TOKO'],
+            'nama_ekspedisi' => ['21 EXPRESS', 'KURIR/DRIVER', 'SALES', 'PO BERSAUDARA', 'DIAMBIL TOKO', 'J&T', 'ID EXPRESS', 'TRAVEL PUTRA', 'TRAVEL GEMOY', 'CENTRAL CARGO', 'PO PATABA', 'RENTAL Z', 'RENTAL BUOL FAMILY TRANS', 'KURIR FAISAL', 'YUNUS HASAN(DEALER)', 'SELVY PROMOTOR', 'AMJP CARGO', 'DIAMBIL LANGSUNG OLEH TOKO', 'IMELDA', 'SABILUNA', 'GRAHA JAYA', 'DIAMBIL OWNER TOKO', 'GARUDA', 'BUS LITHA', 'POS INDONESIA', 'GATOS', 'PROMOTOR DHINI ANGGRAENI'],
+            'ketentuan_biaya_kirim' => ['INVOICE', 'COLLECT', 'INTERNAL', 'DIAMBIL TOKO', 'DFOD', 'DIBAYAR TOKO'],
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR', 'TIDAK ADA PENGIRIMAN', 'CV. TOP SELULER'],
+        ],
+        'MAKASSAR' => [
+            'nama_ekspedisi' => ['21 EXPRESS', 'KURIR FAISAL', 'YUNUS HASAN(DEALER)', 'J&T EXPRESS', 'SALES IRFAN', 'SELVY PROMOTOR', 'AMJP CARGO', 'DIAMBIL LANGSUNG OLEH TOKO', 'ALIF JASA TRANS SULAWESI', 'J&T', 'IMELDA', 'SABILUNA', 'GRAHA JAYA', 'DIAMBIL OWNER TOKO', 'GARUDA', 'BUS LITHA', 'POS INDONESIA', 'GATOS', 'PROMOTOR DHINI ANGGRAENI', 'RAHMAT PROMOTOR', 'DIAMBIL KARYAWAN TOKO', 'AGUNG CA"&"RGO', 'WAHYU EXPRESS', 'CAHAYA MUJUR EXPRESS', 'BUS BINTANG PRIMA', 'PUTRA JAYA EXPRESS', 'SALES IKBAL', 'SALES IK"&"BAL', 'LESTARI JAYA EXPRESS', 'PELITA JAYA', 'KJS', 'ALIF JASA', 'SENTRAL CARGO', 'SINAR JAYA EXPRESS', 'BINTANG JAYA', 'CAHAYA MUJUR', 'BINTANG BARU', 'ZUL EXPEDISI', 'SALES TANZIL', 'SALES SULFIKAR', 'IRADHA "&"MANDIRI', 'TAJU TRAVEL'],
+            'brand' => ['VILLAON', 'MOTOROLA', 'DOKUMEN', 'LAPTOP ASUS', 'MINIMO', 'RAPPA', 'MOTOPAD'],
+            'nama_kota' => ['PALOPO', 'GOWA', 'LUWU TIMUR', 'SINJAI', 'PALU', 'SIDENRENG RAPPANG', 'KENDARI', 'PINRANG', 'LUWU UTARA', 'WAJO', 'JAKARTA', 'PARE PARE', 'BAUBAU', 'BUTON TENGAH', 'SOPPENG', 'KONAWE', 'LUWU', 'CIREBON', 'MAKASAR', 'KOLAKA UTARA', 'WAKATOBI', 'BANTAENG', 'SIDRAP', 'TORAJA UTARA', 'MAMASA', 'MANADO', 'ENREKANG', 'JENEPONTO', 'BONE', '"&"MAROS', 'AMBON', 'POLEWALI MANDAR', 'KEPULAUAN SELAYAR', 'TAKALAR', 'BULUKUMBA', 'SURABAYA', 'BANJARMASIN', 'PONTIANAK', 'DENPASAR', 'MALANG', 'MAJENE', 'TANA TORAJA', 'PANGKAJENE', 'MAMUJU TENGAH', 'PARIGI MOUTONG', 'SAMARINDA', 'MATARAM', 'PALEMBANG'],
+            'ketentuan_biaya_kirim' => ['INVOICE', 'COLLECT'],
+            'status_pembayaran' => ['TAGIHAN BULANAN', 'SUDAH DIBAYAR DIDEPO', 'ONGKIR DI TOKO'],
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR', 'TIDAK ADA PENGIRIMAN'],
+        ],
+        'BENGKULU' => [
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR'],
+        ],
+        'PEKANBARU' => [
+            'badan_usaha' => ['PT. MEDIA SELULLER INDONESIA', 'CV. TOP SELULAR', 'PT. MEDIA SELULAR INDONESIA', 'CV. COMPLETE SELULAR'],
+        ],
+        'MEDAN' => [
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR'],
+        ],
+        'LAMPUNG' => [
+            'badan_usaha' => ['PT. MEDIA SELULLER INDONESIA', 'PT. SATU MEDIA INDONESIA', 'CV. TOP SELULAR', 'PT. MEDIA SELULAR INDONESIA', 'CV. COMPLETE SELULAR'],
+        ],
+        'PADANG' => [
+            'badan_usaha' => ['PT. MEDIA SELULLER INDONESIA', 'PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR'],
+        ],
+        'PALEMBANG' => [
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR'],
+        ],
+        'JAMBI' => [
+            'badan_usaha' => ['PT. MEDIA SELULAR INDONESIA', 'CV. TOP SELULAR', 'CV. COMPLETE SELULAR', 'CV. TOP SELLULAR'],
+        ],
+    ],
+];
