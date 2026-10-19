@@ -31,6 +31,7 @@ class CreateFreightInvoice extends CreateRecord
                 ? $data['invoice_number']
                 : $this->invoiceNumberFromFileName((string) ($data['invoice_file_name'] ?? basename($relativePath))),
             'invoice_date' => now()->toDateString(),
+            'origin_city' => $data['origin_city'] ?? null,
             'file_path' => $fullPath,
             'status' => 'processing',
             'created_by' => auth()->id(),
@@ -41,7 +42,7 @@ class CreateFreightInvoice extends CreateRecord
 
         Notification::make()
             ->title('Invoice sedang dicek')
-            ->body('Setiap resi dicocokkan ke Data Pengiriman dan Tarif Kontrak di belakang layar. Refresh halaman ini sebentar lagi.')
+            ->body('Tarif & berat setiap resi dicek ke Tarif Kontrak di belakang layar. Refresh halaman ini sebentar lagi.')
             ->success()
             ->send();
 

@@ -3,11 +3,10 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\FreightInvoices\Pages\CreateFreightInvoice;
+use App\Filament\Resources\FreightInvoices\Pages\ListFreightInvoices;
 use App\Filament\Resources\FreightInvoices\Pages\ViewFreightInvoice;
 use App\Filament\Resources\FreightInvoices\RelationManagers\ItemsRelationManager;
 use App\Jobs\ProcessFreightReconciliationJob;
-use App\Models\CsaImport;
-use App\Models\CsaShipment;
 use App\Models\Expedition;
 use App\Models\ExpeditionRateCard;
 use App\Models\FreightInvoice;
@@ -16,6 +15,7 @@ use App\Services\FreightReconciliationService;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Database\Seeders\ExpeditionRateCardSeeder;
 use Database\Seeders\ExpeditionSeeder;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
@@ -46,26 +46,8 @@ class FreightReconciliationTest extends TestCase
         $this->user = User::factory()->create();
     }
 
-    public function test_matched_shipment_audited_correctly(): void
+    public function test_line_matching_the_contract_rate_is_paid_in_full(): void
     {
-        $import = CsaImport::create([
-            'user_id' => $this->user->id,
-            'file_name' => 'sales.xlsx',
-            'file_path' => '/tmp/sales.xlsx',
-            'status' => 'completed',
-        ]);
-
-        $shipment = CsaShipment::create([
-            'csa_import_id' => $import->id,
-            'no_sj' => 'SJ-CRB-001',
-            'no_resi_awb' => 'JNT12345678',
-            'kode_gudang' => 'GMCRB',
-            'target_sheet' => 'CIREBON',
-            'nama_kota' => 'INDRAMAYU',
-            'berat' => 2.0,
-            'total_nominal_sj' => 1000000.0,
-        ]);
-
         $invoice = FreightInvoice::create([
             'expedition_id' => $this->expedition->id,
             'invoice_number' => 'INV-TEST-001',
@@ -73,11 +55,7 @@ class FreightReconciliationTest extends TestCase
             'status' => 'processing',
         ]);
 
-        // Rate card CIREBON -> INDRAMAYU is Rp 8,000/kg with 0.2% insurance
-        // Expected base = 2kg * 8,000 = 16,000
-        // Expected insurance = 1,000,000 * 0.2% = 2,000
-        // Expected total = 18,000
-
+        // Tarif Kontrak CIREBON -> INDRAMAYU Rp 8.000/kg; ditagih 2 kg × 8.000 + asuransi 2.000 = 18.000
         $rawItems = [
             [
                 'no_resi_awb' => 'JNT12345678',
@@ -104,10 +82,10 @@ class FreightReconciliationTest extends TestCase
 
         $item = $result->items->first();
         $this->assertEquals('matched', $item->audit_status);
-        $this->assertEquals($shipment->id, $item->csa_shipment_id);
+        $this->assertEquals(8000, $item->agreed_rate);
     }
 
-    public function test_detects_unrecognized_ghost_shipment(): void
+    public function test_route_without_contract_rate_is_unverified(): void
     {
         $invoice = FreightInvoice::create([
             'expedition_id' => $this->expedition->id,
@@ -131,54 +109,36 @@ class FreightReconciliationTest extends TestCase
         $service = new FreightReconciliationService;
         $result = $service->reconcile($invoice, $rawItems);
 
+        // Tarif CIREBON -> JAKARTA belum ada di Tarif Kontrak: belum bisa dinilai, dipisah dari koreksi
         $this->assertEquals(1, $result->unrecognized_count);
         $this->assertEquals(75000.0, $result->total_billed_amount);
         $this->assertEquals(0.0, $result->total_approved_amount);
-        $this->assertEquals(75000.0, $result->total_discrepancy_amount);
+        $this->assertEquals(0.0, $result->total_discrepancy_amount);
+        $this->assertEquals(75000.0, $result->total_unverified_amount);
 
         $item = $result->items->first();
-        $this->assertEquals('unrecognized', $item->audit_status);
-        $this->assertEquals(75000.0, $item->discrepancy_amount);
+        $this->assertEquals('missing_rate', $item->audit_status);
+        $this->assertEquals(0.0, $item->discrepancy_amount);
     }
 
     public function test_detects_rate_overcharge_and_weight_markup(): void
     {
-        $import = CsaImport::create([
-            'user_id' => $this->user->id,
-            'file_name' => 'sales.xlsx',
-            'file_path' => '/tmp/sales.xlsx',
-            'status' => 'completed',
-        ]);
-
-        // Real weight in warehouse is 2 kg
-        CsaShipment::create([
-            'csa_import_id' => $import->id,
-            'no_sj' => 'SJ-CRB-DISC',
-            'no_resi_awb' => 'JNT88889999',
-            'kode_gudang' => 'GMCRB',
-            'target_sheet' => 'CIREBON',
-            'nama_kota' => 'TASIKMALAYA',
-            'berat' => 2.0,
-            'total_nominal_sj' => 5000000.0,
-        ]);
-
         $invoice = FreightInvoice::create([
             'expedition_id' => $this->expedition->id,
             'invoice_number' => 'INV-DISC-001',
             'invoice_date' => now(),
+            'origin_city' => 'CIREBON',
             'status' => 'processing',
         ]);
 
-        // PKS rate for CIREBON -> TASIKMALAYA is Rp 10,000/kg
-        // Actual weight: 2 kg -> Expected base: 20,000, insurance: 10,000 -> Expected total: 30,000
-        // Expedition billed: 4 kg (+2 kg markup!) at Rp 15,000/kg (+5,000 overcharge!) -> Billed total: 60,000
-
+        // Tarif Kontrak CIREBON -> TASIKMALAYA Rp 10.000/kg (min 1 kg); timbang ekspedisi 2 kg
+        // Ditagih 4 kg (+2 kg) × Rp 15.000/kg (+5.000) = 60.000; seharusnya 2 kg × 10.000 = 20.000
         $rawItems = [
             [
                 'no_resi_awb' => 'JNT88889999',
                 'no_sj' => 'SJ-CRB-DISC',
-                'origin_depo' => 'CIREBON',
                 'destination_city' => 'TASIKMALAYA',
+                'gross_weight' => 2.0,
                 'billed_weight' => 4.0,
                 'billed_rate' => 15000.0,
                 'billed_insurance' => 0.0,
@@ -191,13 +151,14 @@ class FreightReconciliationTest extends TestCase
 
         $this->assertEquals(1, $result->discrepancy_count);
         $this->assertEquals(60000.0, $result->total_billed_amount);
-        $this->assertEquals(30000.0, $result->total_approved_amount);
-        $this->assertEquals(30000.0, $result->total_discrepancy_amount);
+        $this->assertEquals(20000.0, $result->total_approved_amount);
+        $this->assertEquals(40000.0, $result->total_discrepancy_amount);
 
         $item = $result->items->first();
         $this->assertEquals('discrepancy_both', $item->audit_status);
+        $this->assertEquals('CIREBON', $item->origin_depo);
         $this->assertEquals(2.0, $item->weight_discrepancy);
-        $this->assertEquals(30000.0, $item->discrepancy_amount);
+        $this->assertEquals(40000.0, $item->discrepancy_amount);
     }
 
     public function test_expedition_invoice_file_is_checked_against_contract_rates(): void
@@ -215,14 +176,6 @@ class FreightReconciliationTest extends TestCase
             ]);
         }
 
-        $this->shipment('R-BOGOR', 'SJ-1', 17);
-        $this->shipment('R-BEKASI', 'SJ-2', 1.5);
-        $this->shipment('R-PLG', 'SJ-3', 1);
-        $this->shipment('R-IDM', 'SJ-4', 3);
-        // Satu resi berisi dua SJ: beratnya dijumlah
-        $this->shipment('R-GABUNG', 'SJ-5', 14.52);
-        $this->shipment('R-GABUNG', 'SJ-6', 10.22);
-
         // Format invoice 21 Express: kolom CEK TARIF isian admin dan Tariff Total bukan tarif per kg
         $path = $this->invoiceFile([
             ['Date', 'Shipment No', 'Destination', 'Gross Weight', 'Chargeable Weight', 'Service Type', 'Tariff', 'CEK TARIF', 'Tariff Total', 'Total IDR', 'Nomor sj', 'Amount'],
@@ -230,7 +183,8 @@ class FreightReconciliationTest extends TestCase
             ['46266.25', 'R-BEKASI', 'BEKASI', 1.46, 2, 'ECO', 7000, 'SESUAI', 14000, 14000, 'SJ-2', 568800],
             ['46266.24', 'R-PLG', 'PALEMBANG', 1, 1, 'ECO', 31000, 'REVISI DARAT', 31000, 31000, 'SJ-3', 0],
             ['46266.24', 'R-IDM', 'INDRAMAYU-INDRAMAYU JAWA BARAT', 3.34, 10, 'DARAT', 5000, 'SESUAI', 50000, 50000, 'SJ-4', 2019000],
-            ['46266.24', 'R-GABUNG', 'BOGOR', 20, 20, 'DARAT', 1500, 'SESUAI', 30000, 30000, '-', 0],
+            // Timbang 6 kg tapi ditagih 20 kg (minimum hanya 10 kg)
+            ['46266.24', 'R-BERAT', 'BOGOR', 6, 20, 'DARAT', 1500, 'SESUAI', 30000, 30000, '-', 0],
             ['', '', '', '', '', '', '', '', '', 'Grand Total', '', 152000],
         ]);
 
@@ -244,25 +198,37 @@ class FreightReconciliationTest extends TestCase
         $this->assertSame(18.0, $rows[0]['billed_weight']);
         $this->assertSame('ECO', $rows[1]['service_type']);
 
+        // Invoice tidak mencantumkan kota asal: dipakai Kota Asal yang dipilih saat upload
         $invoice = FreightInvoice::create([
             'expedition_id' => $expedition->id,
             'invoice_number' => 'INV-21-SEP',
             'invoice_date' => now(),
+            'origin_city' => 'JAKARTA',
             'status' => 'processing',
         ]);
         $items = $service->reconcile($invoice, $rows)->items->keyBy('no_resi_awb');
 
         $this->assertSame('matched', $items['R-BOGOR']->audit_status);
         $this->assertSame('JAKARTA', $items['R-BOGOR']->origin_depo);
+        // Timbang 17,34 kg dibulatkan jadi 18 kg: sesuai berarti dibayar penuh
+        $this->assertEquals(27000, $items['R-BOGOR']->expected_total);
+        $this->assertEquals(0, $items['R-BOGOR']->discrepancy_amount);
+        $this->assertEquals(17.34, $items['R-BOGOR']->actual_weight);
         // ECO dibandingkan ke tarif UDARA; lebih murah dari kontrak tetap sesuai
         $this->assertSame('matched', $items['R-BEKASI']->audit_status);
         $this->assertEquals(8000, $items['R-BEKASI']->agreed_rate);
         // ECO tanpa tarif UDARA, padahal DARAT (min 10 kg × Rp3.000 = Rp30.000) lebih murah
         $this->assertSame('revisi_darat', $items['R-PLG']->audit_status);
         $this->assertEquals(1000, $items['R-PLG']->discrepancy_amount);
+        // Tarif rute belum ada: belum terverifikasi
         $this->assertSame('missing_rate', $items['R-IDM']->audit_status);
-        $this->assertSame('matched', $items['R-GABUNG']->audit_status);
-        $this->assertEquals(24.74, $items['R-GABUNG']->actual_weight);
+        $this->assertEquals(50000, $invoice->fresh()->total_unverified_amount);
+        // Resi yang tarifnya belum ada tidak ikut dihitung "perlu dicek" (revisi darat + berat lebih saja)
+        $this->assertSame(1, $invoice->fresh()->unrecognized_count);
+        $this->assertSame(2, $invoice->fresh()->discrepancy_count);
+        // Seharusnya max(6 kg, min 10 kg) = 10 kg × 1.500 = 15.000
+        $this->assertSame('discrepancy_weight', $items['R-BERAT']->audit_status);
+        $this->assertEquals(15000, $items['R-BERAT']->discrepancy_amount);
 
         // Halaman detail menampilkan kolom CEK TARIF per resi
         $admin = User::factory()->create();
@@ -293,6 +259,8 @@ class FreightReconciliationTest extends TestCase
         Livewire::test(CreateFreightInvoice::class)
             ->fillForm([
                 'expedition_id' => $this->expedition->id,
+                // Pilihan kota asal diambil dari Tarif Kontrak ekspedisi itu (seeder J&T: CIREBON & BANDUNG)
+                'origin_city' => 'CIREBON',
                 'invoice_file' => UploadedFile::fake()->create('PT. Satu Media Indonesia September 2026 - 21 Express.xlsx', 50, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
             ])
             ->call('create')
@@ -301,21 +269,137 @@ class FreightReconciliationTest extends TestCase
         // Nomor invoice kosong: diambil dari nama file
         $invoice = FreightInvoice::sole();
         $this->assertSame('PT. Satu Media Indonesia September 2026 - 21 Express', $invoice->invoice_number);
+        $this->assertSame('CIREBON', $invoice->origin_city);
         $this->assertSame(now()->toDateString(), $invoice->invoice_date->toDateString());
         Queue::assertPushed(ProcessFreightReconciliationJob::class);
     }
 
-    private function shipment(string $resi, string $noSj, float $berat): CsaShipment
+    public function test_admin_approves_a_special_agreement_manually(): void
     {
-        return CsaShipment::create([
-            'no_sj' => $noSj,
-            'no_resi_awb' => $resi,
-            'kode_gudang' => 'GMJKT',
-            'target_sheet' => 'JAKARTA PIK',
-            'nama_kota' => 'BOGOR',
-            'berat' => $berat,
-            'total_nominal_sj' => 1000000,
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-CHARTER',
+            'invoice_date' => now(),
+            'status' => 'processing',
         ]);
+        $rows = [[
+            'no_resi_awb' => '100239850235', 'no_sj' => '', 'origin_depo' => '', 'destination_city' => 'CIREBON',
+            'billed_weight' => 4285.0, 'billed_rate' => 2900.0, 'billed_insurance' => 0.0, 'billed_total' => 12426500.0,
+        ]];
+        $service = new FreightReconciliationService;
+        $item = $service->reconcile($invoice, $rows)->items->sole();
+        $this->assertEquals(12426500, $invoice->fresh()->total_unverified_amount);
+
+        $role = Role::firstOrCreate(['name' => Utils::getSuperAdminName(), 'guard_name' => 'web']);
+        $role->givePermissionTo(Permission::firstOrCreate(['name' => 'Update:FreightInvoice', 'guard_name' => 'web']));
+        $admin = User::factory()->create();
+        $admin->assignRole($role);
+        $this->actingAs($admin);
+
+        // Charter disepakati Rp2,5 jt
+        Livewire::test(ItemsRelationManager::class, ['ownerRecord' => $invoice, 'pageClass' => ViewFreightInvoice::class])
+            ->callTableAction('approveManually', $item, data: ['manual_approved_amount' => 2500000, 'manual_note' => 'Charter 2,5 jt'])
+            ->assertHasNoTableActionErrors()
+            ->assertSee('DISETUJUI MANUAL');
+
+        $invoice->refresh();
+        $this->assertEquals(2500000, $invoice->total_approved_amount);
+        $this->assertEquals(9926500, $invoice->total_discrepancy_amount);
+        $this->assertEquals(0, $invoice->total_unverified_amount);
+        $this->assertSame(1, $invoice->matched_count);
+        $this->assertSame($admin->id, $item->fresh()->manual_approved_by);
+
+        // Audit ulang tidak menghapus persetujuan manual
+        $service->reconcile($invoice, $rows);
+        $this->assertEquals(2500000, $invoice->fresh()->total_approved_amount);
+        $this->assertSame('Charter 2,5 jt', $invoice->items()->sole()->manual_note);
+
+        Livewire::test(ItemsRelationManager::class, ['ownerRecord' => $invoice, 'pageClass' => ViewFreightInvoice::class])
+            ->callTableAction('cancelManualApproval', $invoice->items()->sole());
+
+        $this->assertEquals(12426500, $invoice->fresh()->total_unverified_amount);
+        $this->assertEquals(0, $invoice->fresh()->total_approved_amount);
+    }
+
+    public function test_reaudit_asks_for_the_origin_city(): void
+    {
+        Queue::fake();
+        $role = Role::firstOrCreate(['name' => Utils::getSuperAdminName(), 'guard_name' => 'web']);
+        $role->givePermissionTo(Permission::firstOrCreate(['name' => 'ViewAny:FreightInvoice', 'guard_name' => 'web']));
+        $admin = User::factory()->create();
+        $admin->assignRole($role);
+        $this->actingAs($admin);
+
+        // Invoice lama tanpa kota asal: semua tarif tidak bisa dicari
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-TANPA-ASAL',
+            'invoice_date' => now(),
+            'status' => 'audited',
+        ]);
+
+        Livewire::test(ListFreightInvoices::class)
+            ->callAction(TestAction::make('reAudit')->table($invoice), data: ['origin_city' => 'BANDUNG'])
+            ->assertHasNoFormErrors()
+            ->assertNotified('Audit Ulang Dimulai');
+
+        $this->assertSame('BANDUNG', $invoice->fresh()->origin_city);
+        Queue::assertPushed(ProcessFreightReconciliationJob::class, fn (ProcessFreightReconciliationJob $job): bool => $job->invoice->is($invoice));
+    }
+
+    public function test_detail_page_shows_the_invoice_summary(): void
+    {
+        $role = Role::firstOrCreate(['name' => Utils::getSuperAdminName(), 'guard_name' => 'web']);
+        foreach (['ViewAny:FreightInvoice', 'View:FreightInvoice'] as $permission) {
+            $role->givePermissionTo(Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'web']));
+        }
+        $admin = User::factory()->create();
+        $admin->assignRole($role);
+        $this->actingAs($admin);
+
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-21-SEP',
+            'invoice_date' => '2026-10-19',
+            'origin_city' => 'JAKARTA',
+            'status' => 'audited',
+            'total_items_count' => 173,
+            'matched_count' => 164,
+            'discrepancy_count' => 3,
+            'unrecognized_count' => 6,
+            'total_billed_amount' => 42143250,
+            'total_approved_amount' => 39996250,
+            'total_discrepancy_amount' => 1881000,
+            'total_unverified_amount' => 266000,
+        ]);
+
+        Livewire::test(ViewFreightInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertSee(['Informasi Invoice', 'Ringkasan Tagihan', 'JAKARTA', 'Selesai Diaudit'])
+            ->assertSee(['164 resi sesuai Tarif Kontrak', '3 resi perlu dicek', '6 resi, tarif belum ada']);
+    }
+
+    public function test_explanation_menu_breaks_down_the_totals(): void
+    {
+        $role = Role::firstOrCreate(['name' => Utils::getSuperAdminName(), 'guard_name' => 'web']);
+        $role->givePermissionTo(Permission::firstOrCreate(['name' => 'ViewAny:FreightInvoice', 'guard_name' => 'web']));
+        $admin = User::factory()->create();
+        $admin->assignRole($role);
+        $this->actingAs($admin);
+
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-PENJELASAN',
+            'invoice_date' => now(),
+            'status' => 'processing',
+        ]);
+        (new FreightReconciliationService)->reconcile($invoice, [[
+            'no_resi_awb' => 'CHARTER-1', 'no_sj' => '', 'origin_depo' => '', 'destination_city' => 'CIREBON',
+            'billed_weight' => 4285.0, 'billed_rate' => 2900.0, 'billed_insurance' => 0.0, 'billed_total' => 12426500.0,
+        ]]);
+
+        Livewire::test(ListFreightInvoices::class)
+            ->mountAction(TestAction::make('explainTotals')->table($invoice))
+            ->assertMountedActionModalSee(['Ditagih = Disetujui + Koreksi + Belum Terverifikasi', 'TARIF BELUM ADA', 'Rp 12.426.500', 'Tambah tarif / setujui manual']);
     }
 
     /**

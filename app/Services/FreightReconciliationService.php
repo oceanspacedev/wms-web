@@ -2,13 +2,11 @@
 
 namespace App\Services;
 
-use App\Models\CsaShipment;
 use App\Models\ExpeditionRateCard;
 use App\Models\FreightInvoice;
 use App\Models\FreightInvoiceItem;
 use App\Support\Rupiah;
 use Exception;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class FreightReconciliationService
@@ -27,24 +25,19 @@ class FreightReconciliationService
     public function __construct(private XlsxReader $reader = new XlsxReader) {}
 
     /**
-     * Cocokkan setiap baris invoice ekspedisi dengan pengiriman riil seluruh depo (Data Pengiriman)
-     * dan dengan Tarif Kontrak ekspedisi tersebut.
+     * Cek setiap baris invoice ekspedisi terhadap Tarif Kontrak ekspedisi tersebut (yang juga dipakai menu Cek Tarif).
+     * Asal pengiriman diambil dari kolom asal di invoice kalau ada, selain itu dari Kota Asal yang dipilih saat upload.
      *
      * @param  array<int, array<string, mixed>>  $rawItems
      */
     public function reconcile(FreightInvoice $invoice, array $rawItems): FreightInvoice
     {
         return DB::transaction(function () use ($invoice, $rawItems) {
+            // Persetujuan manual admin tetap berlaku saat audit ulang
+            $manualApprovals = $invoice->items()->whereNotNull('manual_approved_at')->get()->keyBy('no_resi_awb');
+
             // Delete previous items if re-auditing
             $invoice->items()->delete();
-
-            $totalBilled = 0.0;
-            $totalApproved = 0.0;
-            $totalDiscrepancy = 0.0;
-            $matchedCount = 0;
-            $discrepancyCount = 0;
-            $unrecognizedCount = 0;
-            $duplicateCount = 0;
 
             $rateCards = $this->rateCardIndex($invoice->expedition_id);
             $origins = collect($rateCards)->flatten()->map(fn (ExpeditionRateCard $card): string => $this->upper($card->origin_depo))->unique()->values()->all();
@@ -57,8 +50,6 @@ class FreightReconciliationService
 
             $itemsToInsert = [];
             $now = now();
-            $shipmentsByResi = $this->shipmentsByIdentifier($rawItems, 'no_resi_awb');
-            $shipmentsBySj = $this->shipmentsByIdentifier($rawItems, 'no_sj');
 
             foreach ($rawItems as $item) {
                 $noResi = $this->reader->normalizeIdentifier((string) ($item['no_resi_awb'] ?? ''));
@@ -75,127 +66,94 @@ class FreightReconciliationService
                     $billedTotal = ($billedWeight * $billedRate) + $billedInsurance;
                 }
 
-                $totalBilled += $billedTotal;
-
                 $auditStatus = 'matched';
                 $auditNotes = [];
-                $actualShipment = null;
-                $actualWeight = null;
+                // Berat timbang ekspedisi (gross) di invoice
+                $actualWeight = $grossWeight > 0 ? $grossWeight : null;
                 $expectedTotal = $billedTotal;
                 $agreedRate = 0.0;
-                $agreedInsurance = 0.0;
-                $originDepo = null;
+                $originDepo = $this->resolveOrigin([$item['origin_depo'] ?? '', $invoice->origin_city], $origins);
 
                 // 1. DUPLICATE CHECK
                 if (! empty($noResi) && isset($previousResi[$noResi])) {
                     $auditStatus = 'duplicate';
                     $auditNotes[] = "Resi sudah pernah ditagihkan pada Faktur #{$previousResi[$noResi]}";
                     $expectedTotal = 0.0;
-                    $duplicateCount++;
                 } else {
-                    $shipments = ($noResi !== '' ? $shipmentsByResi->get($noResi) : null)
-                        ?? ($noSj !== '' ? $shipmentsBySj->get($noSj) : null);
-                    $actualShipment = $shipments?->first();
+                    $destinations = $this->destinationKeys([$item['destination_city'] ?? '']);
+                    $destinationLabel = $destinations[0] ?? '-';
+                    $rateCard = $this->findRateCard($rateCards, $originDepo, $destinations, $service);
 
-                    if (! $actualShipment) {
-                        $auditStatus = 'unrecognized';
-                        $auditNotes[] = 'Resi/SJ tidak ditemukan pada riil pengiriman seluruh depo Ocean Space';
-                        $expectedTotal = 0.0;
-                        $unrecognizedCount++;
-                    } else {
-                        $originDepo = $this->resolveOrigin([$item['origin_depo'] ?? '', $actualShipment->target_sheet, $actualShipment->nama_gudang], $origins);
-                        // Kota di Data Pengiriman hanya dipakai kalau invoice tidak menyebut tujuan
-                        $destinations = $this->destinationKeys([trim((string) ($item['destination_city'] ?? '')) ?: $actualShipment->nama_kota]);
-                        $destinationLabel = $destinations[0] ?? '-';
+                    if ($rateCard) {
+                        $agreedRate = (float) $rateCard->rate_per_kg;
+                        $hasRateIssue = $billedRate > 0 && $billedRate > $agreedRate + 0.5;
+                        $hasWeightIssue = false;
+                        $chargeWeight = $billedWeight;
 
-                        // Berat dasar: berat gudang di Data Pengiriman; kalau kosong, berat timbang ekspedisi (gross)
-                        $recordedWeight = $this->recordedWeight($shipments);
-                        $weightBasis = $recordedWeight > 0 ? $recordedWeight : $grossWeight;
-                        $actualWeight = $weightBasis > 0 ? $weightBasis : null;
+                        if ($grossWeight > 0) {
+                            // Berat ditagih = berat timbang dibulatkan ke atas, minimal min. kg di Tarif Kontrak
+                            $expectedWeight = max(ceil(round($grossWeight, 2)), (float) $rateCard->min_kg);
 
-                        $insurancePercent = 0.0;
-                        $rateCard = $this->findRateCard($rateCards, $originDepo, $destinations, $service);
-
-                        if ($rateCard) {
-                            $agreedRate = (float) $rateCard->rate_per_kg;
-                            $insurancePercent = (float) $rateCard->insurance_rate_percent;
-                            $agreedInsurance = round((float) $actualShipment->total_nominal_sj * ($insurancePercent / 100), 2);
-
-                            $hasRateIssue = $billedRate > 0 && $billedRate > $agreedRate + 0.5;
-                            $hasWeightIssue = false;
-                            $chargeWeight = $billedWeight;
-
-                            if ($weightBasis > 0) {
-                                // Berat ditagih = berat dibulatkan ke atas, minimal min. kg di Tarif Kontrak
-                                $expectedWeight = max(ceil(round($weightBasis, 2)), (float) $rateCard->min_kg);
-                                $chargeWeight = min($billedWeight, $expectedWeight);
-
-                                // Toleransi selisih timbangan gudang vs ekspedisi: 1 kg atau 10%
-                                if ($billedWeight > $expectedWeight + max(1.0, $expectedWeight * 0.1)) {
-                                    $hasWeightIssue = true;
-                                    $auditNotes[] = "Berat Lebih: Ditagih {$billedWeight} kg vs seharusnya {$expectedWeight} kg (berat {$weightBasis} kg, min. {$this->kg((float) $rateCard->min_kg)} kg)";
-                                }
-                            } else {
-                                $auditNotes[] = 'Berat gudang belum tercatat, markup berat tidak dinilai';
+                            if ($billedWeight > $expectedWeight + 0.5) {
+                                $hasWeightIssue = true;
+                                $chargeWeight = $expectedWeight;
+                                $auditNotes[] = "Berat Lebih: Ditagih {$this->kg($billedWeight)} kg vs seharusnya {$this->kg($expectedWeight)} kg (timbang {$this->kg($grossWeight)} kg, min. {$this->kg((float) $rateCard->min_kg)} kg)";
                             }
+                        }
 
-                            if ($hasRateIssue) {
-                                $auditNotes[] = 'Tarif Melebihi Kontrak: Ditagih Rp '.$this->rupiah($billedRate).'/kg vs Tarif Kontrak Rp '.$this->rupiah($agreedRate).'/kg (+Rp '.$this->rupiah($billedRate - $agreedRate).'/kg)';
-                            } elseif ($billedRate > 0 && $billedRate < $agreedRate - 0.5) {
-                                $auditNotes[] = 'Lebih murah dari Tarif Kontrak (Rp '.$this->rupiah($agreedRate).'/kg)';
-                            }
+                        if ($hasRateIssue) {
+                            $auditNotes[] = 'Tarif Melebihi Kontrak: Ditagih Rp '.$this->rupiah($billedRate).'/kg vs Tarif Kontrak Rp '.$this->rupiah($agreedRate).'/kg (+Rp '.$this->rupiah($billedRate - $agreedRate).'/kg)';
+                        } elseif ($billedRate > 0 && $billedRate < $agreedRate - 0.5) {
+                            $auditNotes[] = 'Lebih murah dari Tarif Kontrak (Rp '.$this->rupiah($agreedRate).'/kg)';
+                        }
 
-                            $contractTotal = round($chargeWeight * ($billedRate > 0 ? min($billedRate, $agreedRate) : $agreedRate) + $agreedInsurance, 2);
+                        $auditStatus = match (true) {
+                            $hasWeightIssue && $hasRateIssue => 'discrepancy_both',
+                            $hasWeightIssue => 'discrepancy_weight',
+                            $hasRateIssue => 'discrepancy_rate',
+                            default => 'matched',
+                        };
+
+                        // Sesuai berarti dibayar penuh; yang bermasalah dihitung ulang dengan Tarif Kontrak
+                        if ($auditStatus !== 'matched') {
+                            $contractTotal = round($chargeWeight * ($billedRate > 0 ? min($billedRate, $agreedRate) : $agreedRate) + $billedInsurance, 2);
                             $expectedTotal = min($billedTotal, $contractTotal);
-
-                            $auditStatus = match (true) {
-                                $hasWeightIssue && $hasRateIssue => 'discrepancy_both',
-                                $hasWeightIssue => 'discrepancy_weight',
-                                $hasRateIssue => 'discrepancy_rate',
-                                $weightBasis <= 0 => 'missing_weight',
-                                default => 'matched',
-                            };
-                        } elseif ($service !== null && $service !== 'DARAT'
-                            && ($darat = $this->findRateCard($rateCards, $originDepo, $destinations, 'DARAT'))) {
-                            // Layanan yang ditagih (mis. ECO/UDARA) belum ada tarifnya: bandingkan dengan tarif DARAT rute yang sama
-                            $agreedRate = (float) $darat->rate_per_kg;
-                            $daratWeight = max($weightBasis > 0 ? ceil(round($weightBasis, 2)) : $billedWeight, (float) $darat->min_kg);
-                            $daratCost = round($daratWeight * $agreedRate, 2);
-
-                            if ($billedTotal - $billedInsurance <= $daratCost + 0.5) {
-                                $auditStatus = 'matched';
-                                $auditNotes[] = "Tarif {$billedService} {$originDepo} → {$destinationLabel} belum ada di Tarif Kontrak; tagihan tidak lebih mahal dari DARAT ({$this->kg($daratWeight)} kg × Rp {$this->rupiah($agreedRate)} = Rp {$this->rupiah($daratCost)})";
-                            } else {
-                                $auditStatus = 'revisi_darat';
-                                $auditNotes[] = "Tarif {$billedService} {$originDepo} → {$destinationLabel} belum ada di Tarif Kontrak; lebih murah pakai DARAT: {$this->kg($daratWeight)} kg × Rp {$this->rupiah($agreedRate)} = Rp {$this->rupiah($daratCost)}";
-                                $expectedTotal = min($billedTotal, $daratCost + $billedInsurance);
-                            }
-                        } else {
-                            $auditStatus = 'missing_rate';
-                            $route = ($originDepo ?? '(asal tidak diketahui)').' → '.$destinationLabel.($service ? " ({$service})" : '');
-                            $auditNotes[] = "Tarif Kontrak untuk rute {$route} belum terdaftar di sistem";
-                            $expectedTotal = $billedTotal;
                         }
+                    } elseif ($service !== null && $service !== 'DARAT'
+                        && ($darat = $this->findRateCard($rateCards, $originDepo, $destinations, 'DARAT'))) {
+                        // Layanan yang ditagih (mis. ECO/UDARA) belum ada tarifnya: bandingkan dengan tarif DARAT rute yang sama
+                        $agreedRate = (float) $darat->rate_per_kg;
+                        $daratWeight = max($grossWeight > 0 ? ceil(round($grossWeight, 2)) : $billedWeight, (float) $darat->min_kg);
+                        $daratCost = round($daratWeight * $agreedRate, 2);
 
-                        if ($auditStatus === 'matched') {
-                            $matchedCount++;
+                        if ($billedTotal - $billedInsurance <= $daratCost + 0.5) {
+                            $auditStatus = 'matched';
+                            $auditNotes[] = "Tarif {$billedService} {$originDepo} → {$destinationLabel} belum ada di Tarif Kontrak; tagihan tidak lebih mahal dari DARAT ({$this->kg($daratWeight)} kg × Rp {$this->rupiah($agreedRate)} = Rp {$this->rupiah($daratCost)})";
                         } else {
-                            $discrepancyCount++;
+                            $auditStatus = 'revisi_darat';
+                            $auditNotes[] = "Tarif {$billedService} {$originDepo} → {$destinationLabel} belum ada di Tarif Kontrak; lebih murah pakai DARAT: {$this->kg($daratWeight)} kg × Rp {$this->rupiah($agreedRate)} = Rp {$this->rupiah($daratCost)}";
+                            $expectedTotal = min($billedTotal, $daratCost + $billedInsurance);
                         }
+                    } else {
+                        // Belum bisa dinilai (bukan koreksi): dihitung terpisah sebagai "belum terverifikasi"
+                        $auditStatus = 'missing_rate';
+                        $route = ($originDepo ?? '(kota asal belum dipilih)').' → '.$destinationLabel.($service ? " ({$service})" : '');
+                        $auditNotes[] = "Tarif Kontrak untuk rute {$route} belum terdaftar";
+                        $expectedTotal = 0.0;
                     }
                 }
 
-                $discrepancyAmount = round(max(0, $billedTotal - $expectedTotal), 2);
-                $totalDiscrepancy += $discrepancyAmount;
-                $totalApproved += $expectedTotal;
+                $discrepancyAmount = $auditStatus === 'missing_rate' ? 0.0 : round(max(0, $billedTotal - $expectedTotal), 2);
+                $resiKey = $noResi ?: ($noSj ?: '-');
+                $manual = $manualApprovals->get($resiKey);
 
                 $itemsToInsert[] = [
                     'freight_invoice_id' => $invoice->id,
-                    'csa_shipment_id' => $actualShipment?->id,
-                    'no_resi_awb' => $noResi ?: ($noSj ?: '-'),
-                    'no_sj' => $noSj ?: ($actualShipment?->no_sj ?? null),
-                    'origin_depo' => $originDepo ?? (($item['origin_depo'] ?? '') ?: ($actualShipment?->target_sheet ?? null)),
-                    'destination_city' => ($item['destination_city'] ?? '') ?: ($actualShipment?->nama_kota ?? null),
+                    'csa_shipment_id' => null,
+                    'no_resi_awb' => $resiKey,
+                    'no_sj' => $noSj ?: null,
+                    'origin_depo' => $originDepo ?? (($item['origin_depo'] ?? '') ?: null),
+                    'destination_city' => ($item['destination_city'] ?? '') ?: null,
                     'service_type' => $billedService ?: null,
                     'billed_weight' => $billedWeight,
                     'actual_weight' => $actualWeight,
@@ -203,12 +161,16 @@ class FreightReconciliationService
                     'billed_rate' => $billedRate,
                     'agreed_rate' => $agreedRate,
                     'billed_insurance' => $billedInsurance,
-                    'agreed_insurance' => $agreedInsurance,
+                    'agreed_insurance' => 0.0,
                     'billed_total' => $billedTotal,
                     'expected_total' => $expectedTotal,
                     'discrepancy_amount' => $discrepancyAmount,
                     'audit_status' => $auditStatus,
                     'audit_notes' => implode(' | ', $auditNotes),
+                    'manual_approved_amount' => $manual?->manual_approved_amount,
+                    'manual_note' => $manual?->manual_note,
+                    'manual_approved_by' => $manual?->manual_approved_by,
+                    'manual_approved_at' => $manual?->manual_approved_at,
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
@@ -219,21 +181,35 @@ class FreightReconciliationService
                 DB::table('freight_invoice_items')->insert($chunk);
             }
 
-            // Update parent invoice
-            $invoice->update([
-                'total_billed_amount' => $totalBilled,
-                'total_approved_amount' => $totalApproved,
-                'total_discrepancy_amount' => $totalDiscrepancy,
-                'total_items_count' => count($itemsToInsert),
-                'matched_count' => $matchedCount,
-                'discrepancy_count' => $discrepancyCount,
-                'unrecognized_count' => $unrecognizedCount,
-                'duplicate_count' => $duplicateCount,
-                'status' => 'audited',
-            ]);
+            $this->refreshTotals($invoice, 'audited');
 
             return $invoice->fresh(['items']);
         });
+    }
+
+    /**
+     * Hitung ulang ringkasan invoice dari baris-barisnya (dipakai setelah audit maupun setelah persetujuan manual).
+     * Tagihan yang tarif rutenya belum ada di Tarif Kontrak dipisah sebagai "belum terverifikasi", bukan koreksi.
+     */
+    public function refreshTotals(FreightInvoice $invoice, ?string $status = null): FreightInvoice
+    {
+        $items = $invoice->items()->get();
+
+        $invoice->update(array_filter([
+            'total_billed_amount' => round($items->sum(fn (FreightInvoiceItem $item): float => (float) $item->billed_total), 2),
+            'total_approved_amount' => round($items->sum(fn (FreightInvoiceItem $item): float => $item->approvedAmount()), 2),
+            'total_discrepancy_amount' => round($items->sum(fn (FreightInvoiceItem $item): float => $item->correctionAmount()), 2),
+            'total_unverified_amount' => round($items->filter->isUnverified()->sum(fn (FreightInvoiceItem $item): float => (float) $item->billed_total), 2),
+            'total_items_count' => $items->count(),
+            'matched_count' => $items->filter(fn (FreightInvoiceItem $item): bool => $item->isManuallyApproved() || $item->audit_status === 'matched')->count(),
+            'unrecognized_count' => $items->filter->isUnverified()->count(),
+            'duplicate_count' => $items->filter(fn (FreightInvoiceItem $item): bool => ! $item->isManuallyApproved() && $item->audit_status === 'duplicate')->count(),
+            'discrepancy_count' => $items->filter(fn (FreightInvoiceItem $item): bool => ! $item->isManuallyApproved()
+                && ! $item->isUnverified() && ! in_array($item->audit_status, ['matched', 'duplicate'], true))->count(),
+            'status' => $status,
+        ], fn ($value): bool => $value !== null));
+
+        return $invoice;
     }
 
     /**
@@ -372,50 +348,6 @@ class FreightReconciliationService
             || str_contains($joined, 'chargeable')
             || str_contains($joined, 'ongkir')
             || (str_contains($joined, 'resi') && str_contains($joined, 'biaya'));
-    }
-
-    /**
-     * Berat gudang untuk satu resi: jumlah berat semua SJ dalam resi itu (SJ yang tercatat dobel dihitung sekali).
-     *
-     * @param  Collection<int, CsaShipment>  $shipments
-     */
-    protected function recordedWeight(Collection $shipments): float
-    {
-        return (float) $shipments
-            ->groupBy(fn (CsaShipment $shipment): string => $shipment->no_sj ?: 'id-'.$shipment->id)
-            ->sum(fn (Collection $rows): float => (float) $rows->max('berat'));
-    }
-
-    /**
-     * Data Pengiriman per nomor resi / SJ; satu resi bisa berisi beberapa SJ.
-     *
-     * @param  array<int, array<string, mixed>>  $rawItems
-     * @return Collection<string, Collection<int, CsaShipment>>
-     */
-    protected function shipmentsByIdentifier(array $rawItems, string $field): Collection
-    {
-        $column = $field === 'no_resi_awb' ? 'no_resi_awb' : 'no_sj';
-        $keys = [];
-
-        foreach ($rawItems as $item) {
-            $value = $this->reader->normalizeIdentifier((string) ($item[$field] ?? ''));
-
-            if ($value !== '') {
-                $keys[] = $value;
-            }
-        }
-
-        $keys = array_values(array_unique($keys));
-
-        if ($keys === []) {
-            return collect();
-        }
-
-        return CsaShipment::query()
-            ->whereIn($column, $keys)
-            ->orderBy('id')
-            ->get()
-            ->groupBy(fn (CsaShipment $shipment): string => $this->reader->normalizeIdentifier((string) $shipment->{$column}));
     }
 
     /**

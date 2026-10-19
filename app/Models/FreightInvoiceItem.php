@@ -65,12 +65,18 @@ class FreightInvoiceItem extends Model
         'discrepancy_amount',
         'audit_status',
         'audit_notes',
+        'manual_approved_amount',
+        'manual_note',
+        'manual_approved_by',
+        'manual_approved_at',
     ];
 
     /**
      * @var array<string, string>
      */
     protected $casts = [
+        'manual_approved_amount' => 'decimal:2',
+        'manual_approved_at' => 'datetime',
         'billed_weight' => 'decimal:2',
         'actual_weight' => 'decimal:2',
         'weight_discrepancy' => 'decimal:2',
@@ -89,5 +95,61 @@ class FreightInvoiceItem extends Model
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(FreightInvoice::class, 'freight_invoice_id');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function manualApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'manual_approved_by');
+    }
+
+    public function isManuallyApproved(): bool
+    {
+        return $this->manual_approved_at !== null;
+    }
+
+    /**
+     * Belum bisa dinilai (tarif rutenya belum ada di Tarif Kontrak) dan belum disetujui manual: bukan koreksi.
+     * "unrecognized" hanya ada di hasil audit lama yang masih mencocokkan ke Data Pengiriman.
+     */
+    public function isUnverified(): bool
+    {
+        return in_array($this->audit_status, ['missing_rate', 'unrecognized'], true) && ! $this->isManuallyApproved();
+    }
+
+    /**
+     * Nominal yang layak dibayar: hasil cek sistem, atau nominal yang disetujui admin secara manual.
+     */
+    public function approvedAmount(): float
+    {
+        if ($this->isManuallyApproved()) {
+            return (float) $this->manual_approved_amount;
+        }
+
+        return $this->isUnverified() ? 0.0 : (float) $this->expected_total;
+    }
+
+    /**
+     * Potongan pasti (ditagih di atas yang layak dibayar); tagihan yang belum terverifikasi tidak dihitung.
+     */
+    public function correctionAmount(): float
+    {
+        if ($this->isUnverified()) {
+            return 0.0;
+        }
+
+        return round(max(0, (float) $this->billed_total - $this->approvedAmount()), 2);
+    }
+
+    public function checkLabel(): string
+    {
+        return $this->isManuallyApproved() ? 'DISETUJUI MANUAL' : (self::STATUS_LABELS[$this->audit_status] ?? $this->audit_status);
+    }
+
+    public function checkColor(): string
+    {
+        return $this->isManuallyApproved() ? 'success' : (self::STATUS_COLORS[$this->audit_status] ?? 'gray');
     }
 }
