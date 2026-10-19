@@ -59,4 +59,10 @@ return [
         'connect_timeout' => (float) env('WAG_CONNECT_TIMEOUT', 5),
     ],
 
+    // Link download aplikasi mobile WMS (sam-app), dikirim via WhatsApp saat akun baru dibuat
+    'wms_app' => [
+        'playstore_url' => env('WMS_APP_PLAYSTORE_URL'),
+        'testflight_url' => env('WMS_APP_TESTFLIGHT_URL'),
+    ],
+
 ];
