@@ -35,5 +35,8 @@
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
         <env name="DEBUGBAR_ENABLED" value="false"/>
+        <env name="WAG_URL" value=""/>
+        <env name="WAG_TOKEN" value=""/>
+        <env name="WAG_CA_BUNDLE" value=""/>
     </php>
 </phpunit>

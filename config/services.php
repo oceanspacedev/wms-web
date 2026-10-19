@@ -57,10 +57,12 @@ return [
         'token' => env('WAG_TOKEN'),
         'timeout' => (float) env('WAG_TIMEOUT', 15),
         'connect_timeout' => (float) env('WAG_CONNECT_TIMEOUT', 5),
+        'ca_bundle' => env('WAG_CA_BUNDLE'),
     ],
 
     // Link download aplikasi mobile WMS (sam-app), dikirim via WhatsApp saat akun baru dibuat
     'wms_app' => [
+        'name' => env('WMS_APP_NAME', 'WMS'),
         'playstore_url' => env('WMS_APP_PLAYSTORE_URL'),
         'testflight_url' => env('WMS_APP_TESTFLIGHT_URL'),
     ],

@@ -39,9 +39,12 @@ class WhatsAppGateway
         }
 
         $token = preg_replace('/^Bearer\s+/i', '', trim($token)) ?? trim($token);
+        // PHP lokal (mis. Herd di Windows) kadang belum punya daftar sertifikat CA; isi WAG_CA_BUNDLE dengan file cacert.pem
+        $caBundle = trim((string) config('services.whatsapp_gateway.ca_bundle', ''));
 
         try {
             $response = Http::acceptJson()
+                ->when($caBundle !== '', fn ($request) => $request->withOptions(['verify' => $caBundle]))
                 ->withToken($token)
                 ->connectTimeout((float) config('services.whatsapp_gateway.connect_timeout', 5))
                 ->timeout((float) config('services.whatsapp_gateway.timeout', 15))

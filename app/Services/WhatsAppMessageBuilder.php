@@ -15,30 +15,35 @@ class WhatsAppMessageBuilder
     }
 
     /**
-     * Pesan sambutan untuk user baru: akun aktif, info login (tanpa password), dan link aplikasi mobile.
+     * Pesan sambutan untuk user baru: nomor WhatsApp sudah bisa dipakai login aplikasi mobile, link download,
+     * dan langkah login. Format tebal memakai *teks* WhatsApp; link berdiri sendiri di satu baris
+     * (tanpa titik di belakang) supaya tidak ikut terbaca sebagai bagian URL.
      */
     public function accountActivatedMessage(User $user): string
     {
-        $appName = (string) config('app.name');
+        $appName = (string) config('services.wms_app.name', 'WMS');
         $name = filled($user->name) ? (string) $user->name : 'User';
 
-        $loginLines = array_filter([
-            filled($user->username) ? "Username: {$user->username}" : null,
-            filled($user->email) ? "Email: {$user->email}" : null,
-        ]);
-
         return implode("\n", [
-            "Halo {$name},",
+            "Halo *{$name}*,",
             '',
-            "Akun {$appName} Anda sudah aktif dan bisa langsung digunakan.",
+            "Nomor WhatsApp Anda sudah terdaftar di *{$appName}* dan bisa digunakan untuk login aplikasi.",
             '',
-            'Info login:',
-            ...$loginLines,
-            'Password: gunakan password yang diberikan admin.',
+            'Silakan download aplikasinya terlebih dahulu:',
             '',
-            "Download aplikasi {$appName}:",
-            'Android (Play Store): '.$this->linkOrFallback('services.wms_app.playstore_url', 'silakan cari di Google Play Store'),
-            'iOS (TestFlight): '.$this->linkOrFallback('services.wms_app.testflight_url', 'silakan minta undangan TestFlight ke admin'),
+            '*Android (Play Store)*',
+            $this->linkOrFallback('services.wms_app.playstore_url', 'Minta link Play Store ke admin'),
+            '',
+            '*iPhone (TestFlight)*',
+            $this->linkOrFallback('services.wms_app.testflight_url', 'Minta undangan TestFlight ke admin'),
+            '_Install aplikasi TestFlight dari App Store terlebih dahulu._',
+            '',
+            '*Cara login:*',
+            '1. Buka aplikasi setelah terpasang.',
+            '2. Masukkan nomor WhatsApp ini.',
+            '3. Masukkan kode OTP yang dikirim ke WhatsApp Anda.',
+            '',
+            'Terima kasih.',
         ]);
     }
 

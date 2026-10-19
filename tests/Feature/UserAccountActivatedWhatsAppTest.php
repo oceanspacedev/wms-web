@@ -67,8 +67,8 @@ class UserAccountActivatedWhatsAppTest extends TestCase
     {
         $this->configureGateway();
         config([
-            'app.name' => 'WMS',
-            'services.wms_app.playstore_url' => 'https://play.google.com/store/apps/details?id=com.oceanspace.wms',
+            'services.wms_app.name' => 'WMS',
+            'services.wms_app.playstore_url' => 'https://play.google.com/store/apps/details?id=com.mediaselularindonesia.sam',
             'services.wms_app.testflight_url' => 'https://testflight.apple.com/join/WMS123',
         ]);
 
@@ -88,13 +88,11 @@ class UserAccountActivatedWhatsAppTest extends TestCase
             $text = $request['message']['text'];
 
             return $request['recipient']['value'] === '6281298765433'
-                && str_contains($text, 'Halo Kasir Tiga')
-                && str_contains($text, 'Akun WMS Anda sudah aktif')
-                && str_contains($text, 'Username: kasir_03')
-                && str_contains($text, 'Email: kasir3@example.com')
-                && str_contains($text, 'https://play.google.com/store/apps/details?id=com.oceanspace.wms')
-                && str_contains($text, 'https://testflight.apple.com/join/WMS123')
-                && ! str_contains($text, 'secret');
+                && str_starts_with($text, "Halo *Kasir Tiga*,\n\nNomor WhatsApp Anda sudah terdaftar di *WMS* dan bisa digunakan untuk login aplikasi.")
+                && str_contains($text, "*Android (Play Store)*\nhttps://play.google.com/store/apps/details?id=com.mediaselularindonesia.sam\n")
+                && str_contains($text, "*iPhone (TestFlight)*\nhttps://testflight.apple.com/join/WMS123\n")
+                && str_contains($text, '2. Masukkan nomor WhatsApp ini.')
+                && ! str_contains($text, 'Password');
         });
     }
 
