@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Filament\Pages\CheckTariff;
+use App\Filament\Resources\ExpeditionRateCards\Pages\ManageExpeditionRateCards;
+use App\Jobs\ImportRateCardsJob;
 use App\Models\Expedition;
 use App\Models\ExpeditionRateCard;
 use App\Models\User;
 use App\Services\RateCardImportService;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -176,6 +181,51 @@ class RateCardImportTest extends TestCase
         $this->assertDatabaseMissing('expedition_rate_cards', [
             'origin_depo' => 'SURABAYA',
             'destination_city' => 'MALANG',
+        ]);
+    }
+
+    public function test_import_action_runs_in_the_background(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        Livewire::actingAs($this->user)
+            ->test(ManageExpeditionRateCards::class)
+            ->callAction('importRateCards', data: [
+                'attachment' => UploadedFile::fake()->createWithContent('PRICELIST ALL EKSPEDISI.csv', $this->priceListCsv()),
+                'mode' => 'replace',
+                'default_insurance_percent' => 0.2,
+            ])
+            ->assertHasNoFormErrors()
+            ->assertNotified('Import tarif sedang diproses');
+
+        // File ±200 ribu baris tidak lagi diproses di dalam request (dulu kena 504 Gateway Time-out)
+        $this->assertSame(0, ExpeditionRateCard::count());
+        Queue::assertPushed(ImportRateCardsJob::class, fn (ImportRateCardsJob $job): bool => $job->fileName === 'PRICELIST ALL EKSPEDISI.csv'
+            && $job->mode === 'replace'
+            && $job->userId === $this->user->id
+            && Storage::disk('local')->exists($job->path));
+    }
+
+    public function test_import_job_saves_prices_as_written_and_notifies_the_uploader(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('rate-card-imports/pricelist.csv', $this->priceListCsv());
+
+        (new ImportRateCardsJob('rate-card-imports/pricelist.csv', 'PRICELIST ALL EKSPEDISI.csv', 'upsert', 0.2, $this->user->id))
+            ->handle(app(RateCardImportService::class));
+
+        // Angka mentah "1500.0" dari export Excel tetap Rp1.500, bukan Rp15.000
+        $this->assertDatabaseHas('expedition_rate_cards', ['destination_city' => 'BOGOR', 'rate_per_kg' => 1500, 'min_kg' => 10]);
+        Storage::disk('local')->assertMissing('rate-card-imports/pricelist.csv');
+        $this->assertSame('Import tarif selesai', $this->user->notifications()->sole()->data['title']);
+    }
+
+    private function priceListCsv(): string
+    {
+        return implode("\n", [
+            'Expedisi,Origin,Provinsi,Kota Tujuan/District,Kecamatan Tujuan/District,/Kg, Price,Lead Time, Service, Kode, KET',
+            '21 EXPRES,JAKARTA,JABODETABEK,BOGOR,BOGOR,10 KG,1500.0,1 HARI,DARAT,,Diambil dari Data Inv Mei',
         ]);
     }
 }

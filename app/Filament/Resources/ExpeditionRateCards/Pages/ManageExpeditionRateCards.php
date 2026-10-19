@@ -3,7 +3,7 @@
 namespace App\Filament\Resources\ExpeditionRateCards\Pages;
 
 use App\Filament\Resources\ExpeditionRateCards\ExpeditionRateCardResource;
-use App\Services\RateCardImportService;
+use App\Jobs\ImportRateCardsJob;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
@@ -11,7 +11,6 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ManageRecords;
-use Illuminate\Support\Facades\Storage;
 
 class ManageExpeditionRateCards extends ManageRecords
 {
@@ -45,8 +44,9 @@ class ManageExpeditionRateCards extends ManageRecords
                             'application/csv',
                         ])
                         ->maxSize(102400)
+                        ->storeFileNamesIn('file_name')
                         ->required()
-                        ->helperText('Mendukung file unduhan Google Sheets / Excel (.xlsx dan .csv) hingga 100 MB.'),
+                        ->helperText('Mendukung file unduhan Google Sheets / Excel (.xlsx dan .csv) hingga 100 MB. Diproses di belakang layar; hasilnya muncul di notifikasi lonceng.'),
 
                     Select::make('mode')
                         ->label('Metode Import')
@@ -65,33 +65,23 @@ class ManageExpeditionRateCards extends ManageRecords
                         ->required()
                         ->helperText('Nilai default premi asuransi jika tidak tertera di baris tarif (cth: 0.2%).'),
                 ])
-                ->action(function (array $data, RateCardImportService $importer): void {
+                ->action(function (array $data): void {
                     $attachment = (string) ($data['attachment'] ?? '');
-                    $filePath = Storage::disk('local')->path($attachment);
 
-                    try {
-                        $result = $importer->importFile(
-                            filePath: $filePath,
-                            mode: (string) ($data['mode'] ?? 'upsert'),
-                            defaultInsurancePercent: (float) ($data['default_insurance_percent'] ?? 0.2)
-                        );
+                    // File pricelist ±200 ribu baris; di dalam request web kena 504 Gateway Time-out
+                    ImportRateCardsJob::dispatch(
+                        $attachment,
+                        (string) ($data['file_name'] ?? basename($attachment)),
+                        (string) ($data['mode'] ?? 'upsert'),
+                        (float) ($data['default_insurance_percent'] ?? 0.2),
+                        auth()->id(),
+                    );
 
-                        Notification::make()
-                            ->title('Import Tarif Berhasil')
-                            ->body($result['message'])
-                            ->success()
-                            ->send();
-                    } catch (\Throwable $e) {
-                        Notification::make()
-                            ->title('Gagal Import Data')
-                            ->body($e->getMessage())
-                            ->danger()
-                            ->send();
-                    } finally {
-                        if (file_exists($filePath)) {
-                            @unlink($filePath);
-                        }
-                    }
+                    Notification::make()
+                        ->title('Import tarif sedang diproses')
+                        ->body('Berjalan di belakang layar ±1–3 menit. Hasilnya muncul di notifikasi lonceng di kanan atas.')
+                        ->success()
+                        ->send();
                 }),
         ];
     }

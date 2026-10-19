@@ -5,6 +5,7 @@ namespace App\Filament\Resources\FreightInvoices\Tables;
 use App\Jobs\ProcessFreightReconciliationJob;
 use App\Models\FreightInvoice;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -103,41 +104,47 @@ class FreightInvoicesTable
                         'paid' => 'Sudah Dibayar',
                     ]),
             ])
+            // Satu tombol titik tiga supaya baris tidak memanjang ke kanan
             ->recordActions([
-                ViewAction::make(),
+                ActionGroup::make([
+                    ViewAction::make(),
 
-                Action::make('reAudit')
-                    ->label('Audit Ulang')
-                    ->icon('heroicon-o-arrow-path')
-                    ->color('gray')
-                    ->requiresConfirmation()
-                    ->action(function (FreightInvoice $record): void {
-                        ProcessFreightReconciliationJob::dispatch($record);
+                    Action::make('reAudit')
+                        ->label('Audit Ulang')
+                        ->icon('heroicon-o-arrow-path')
+                        ->color('gray')
+                        ->requiresConfirmation()
+                        ->action(function (FreightInvoice $record): void {
+                            ProcessFreightReconciliationJob::dispatch($record);
 
-                        Notification::make()
-                            ->title('Audit Ulang Dimulai')
-                            ->body('Proses rekonsiliasi ulang sedang dijalankan di antrean.')
-                            ->info()
-                            ->send();
-                    }),
+                            Notification::make()
+                                ->title('Audit Ulang Dimulai')
+                                ->body('Proses rekonsiliasi ulang sedang dijalankan di antrean.')
+                                ->info()
+                                ->send();
+                        }),
 
-                Action::make('approve')
-                    ->label('Setujui Tagihan')
-                    ->icon('heroicon-o-check-badge')
-                    ->color('success')
-                    ->visible(fn (FreightInvoice $record) => in_array($record->status, ['audited', 'disputed']))
-                    ->requiresConfirmation()
-                    ->action(function (FreightInvoice $record): void {
-                        $record->update(['status' => 'approved']);
+                    Action::make('approve')
+                        ->label('Setujui Tagihan')
+                        ->icon('heroicon-o-check-badge')
+                        ->color('success')
+                        ->visible(fn (FreightInvoice $record) => in_array($record->status, ['audited', 'disputed']))
+                        ->requiresConfirmation()
+                        ->action(function (FreightInvoice $record): void {
+                            $record->update(['status' => 'approved']);
 
-                        Notification::make()
-                            ->title('Faktur Disetujui')
-                            ->body("Faktur #{$record->invoice_number} disetujui sebesar Rp ".number_format($record->total_approved_amount, 0, ',', '.'))
-                            ->success()
-                            ->send();
-                    }),
+                            Notification::make()
+                                ->title('Faktur Disetujui')
+                                ->body("Faktur #{$record->invoice_number} disetujui sebesar Rp ".number_format($record->total_approved_amount, 0, ',', '.'))
+                                ->success()
+                                ->send();
+                        }),
 
-                DeleteAction::make(),
+                    DeleteAction::make(),
+                ])
+                    ->label('Aksi')
+                    ->tooltip('Pilihan Aksi')
+                    ->icon('heroicon-m-ellipsis-vertical'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

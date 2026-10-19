@@ -4,6 +4,7 @@ namespace App\Filament\Resources\FreightInvoices\Pages;
 
 use App\Filament\Resources\FreightInvoices\FreightInvoiceResource;
 use App\Jobs\ProcessFreightReconciliationJob;
+use App\Models\FreightInvoiceItem;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -37,6 +38,7 @@ class ViewFreightInvoice extends ViewRecord
                             'Nomor SJ',
                             'Depo Asal',
                             'Kota Tujuan',
+                            'Layanan',
                             'Berat Tagihan (kg)',
                             'Berat Riil Gudang (kg)',
                             'Selisih Berat (kg)',
@@ -56,6 +58,7 @@ class ViewFreightInvoice extends ViewRecord
                                 $item->no_sj ?? '-',
                                 $item->origin_depo ?? '-',
                                 $item->destination_city ?? '-',
+                                $item->service_type ?? '-',
                                 $item->billed_weight,
                                 $item->actual_weight ?? 0,
                                 $item->weight_discrepancy,
@@ -64,7 +67,7 @@ class ViewFreightInvoice extends ViewRecord
                                 $item->billed_total,
                                 $item->expected_total,
                                 $item->discrepancy_amount,
-                                strtoupper($item->audit_status),
+                                FreightInvoiceItem::STATUS_LABELS[$item->audit_status] ?? strtoupper($item->audit_status),
                                 $item->audit_notes,
                             ]);
                         }

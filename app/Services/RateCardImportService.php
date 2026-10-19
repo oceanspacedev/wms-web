@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Expedition;
 use App\Models\ExpeditionRateCard;
+use App\Support\Rupiah;
 use Exception;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -662,13 +663,11 @@ class RateCardImportService
     }
 
     /**
-     * Parse price string into numeric float (e.g. "Rp 2.900" -> 2900).
+     * Parse price string into numeric float (e.g. "Rp 2.900" -> 2900, sel angka "1500.0" -> 1500).
      */
     protected function parsePrice(string $priceStr): float
     {
-        $clean = preg_replace('/[^\d]/', '', $priceStr);
-
-        return ! empty($clean) ? (float) $clean : 0.0;
+        return Rupiah::parse($priceStr);
     }
 
     /**

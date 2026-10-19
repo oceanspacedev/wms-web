@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Rupiah;
 use Exception;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -211,7 +212,7 @@ class FreightRateGoogleSheetService
             }
 
             // Extract numeric rate
-            $price = (float) preg_replace('/[^\d]/', '', $priceRaw);
+            $price = Rupiah::parse($priceRaw);
             if ($price <= 0) {
                 // If price is missing or 0, still insert or keep
             }

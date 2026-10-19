@@ -11,6 +11,38 @@ class FreightInvoiceItem extends Model
     use HasFactory;
 
     /**
+     * Isi kolom "CEK TARIF" per status audit (istilah yang dipakai admin di file invoice).
+     *
+     * @var array<string, string>
+     */
+    public const STATUS_LABELS = [
+        'matched' => 'SESUAI',
+        'discrepancy_rate' => 'TARIF LEBIH MAHAL',
+        'discrepancy_weight' => 'BERAT LEBIH',
+        'discrepancy_both' => 'BERAT & TARIF LEBIH',
+        'revisi_darat' => 'REVISI DARAT',
+        'missing_rate' => 'TARIF BELUM ADA',
+        'missing_weight' => 'BERAT KOSONG',
+        'unrecognized' => 'TIDAK DITEMUKAN',
+        'duplicate' => 'DOBEL',
+    ];
+
+    /**
+     * @var array<string, string>
+     */
+    public const STATUS_COLORS = [
+        'matched' => 'success',
+        'discrepancy_rate' => 'danger',
+        'discrepancy_weight' => 'danger',
+        'discrepancy_both' => 'danger',
+        'revisi_darat' => 'warning',
+        'missing_rate' => 'gray',
+        'missing_weight' => 'gray',
+        'unrecognized' => 'danger',
+        'duplicate' => 'danger',
+    ];
+
+    /**
      * @var list<string>
      */
     protected $fillable = [
@@ -20,6 +52,7 @@ class FreightInvoiceItem extends Model
         'no_sj',
         'origin_depo',
         'destination_city',
+        'service_type',
         'billed_weight',
         'actual_weight',
         'weight_discrepancy',

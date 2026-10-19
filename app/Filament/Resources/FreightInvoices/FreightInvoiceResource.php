@@ -6,6 +6,7 @@ use App\Filament\Resources\FreightInvoices\Pages\CreateFreightInvoice;
 use App\Filament\Resources\FreightInvoices\Pages\EditFreightInvoice;
 use App\Filament\Resources\FreightInvoices\Pages\ListFreightInvoices;
 use App\Filament\Resources\FreightInvoices\Pages\ViewFreightInvoice;
+use App\Filament\Resources\FreightInvoices\RelationManagers\ItemsRelationManager;
 use App\Filament\Resources\FreightInvoices\Schemas\FreightInvoiceForm;
 use App\Filament\Resources\FreightInvoices\Schemas\FreightInvoiceInfolist;
 use App\Filament\Resources\FreightInvoices\Tables\FreightInvoicesTable;
@@ -50,7 +51,7 @@ class FreightInvoiceResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            ItemsRelationManager::class,
         ];
     }
 
