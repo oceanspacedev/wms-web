@@ -129,17 +129,14 @@ class PurchaseOrderInfolist
                             ->schema([
                                 ImageEntry::make('foto_do')
                                     ->label('Foto DO')
-                                    ->disk('public')
                                     ->placeholder('Tidak ada lampiran'),
 
                                 ImageEntry::make('foto_resi')
                                     ->label('Foto Resi')
-                                    ->disk('public')
                                     ->placeholder('Tidak ada resi'),
 
                                 ImageEntry::make('foto_penerimaan')
                                     ->label('Foto Penerimaan')
-                                    ->disk('public')
                                     ->placeholder('Tidak ada lampiran'),
                             ]),
                     ]),

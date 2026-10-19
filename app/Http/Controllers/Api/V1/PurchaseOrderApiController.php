@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\CreatePurchaseOrderRequest;
 use App\Http\Resources\Api\V1\PurchaseOrderResource;
 use App\Models\PurchaseOrder;
+use App\Support\MediaFileName;
 use Dedoc\Scramble\Attributes\Endpoint;
 use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\QueryParameter;
@@ -62,7 +63,7 @@ class PurchaseOrderApiController extends Controller
 
         foreach (self::PHOTO_DIRECTORIES as $field => $directory) {
             if ($request->hasFile($field)) {
-                $poData[$field] = $request->file($field)->store($directory, 'public');
+                $poData[$field] = MediaFileName::store($request->file($field), $directory, $poData['no_do'], basename($directory));
             }
         }
 

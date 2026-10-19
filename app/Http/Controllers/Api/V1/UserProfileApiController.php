@@ -11,6 +11,7 @@ use App\Http\Resources\Api\V1\AuthUserResource;
 use App\Models\User;
 use App\Models\WhatsappOtp;
 use App\Services\WhatsAppOtpService;
+use App\Support\MediaFileName;
 use App\Support\WhatsAppNumber;
 use Dedoc\Scramble\Attributes\Endpoint;
 use Dedoc\Scramble\Attributes\Group;
@@ -79,10 +80,10 @@ class UserProfileApiController extends Controller
             ], 422);
         }
 
-        $path = $file->store('avatars', 'public');
+        $path = MediaFileName::store($file, 'avatars', $user->username ?? $user->name, 'avatar');
 
         if ($user->avatar_url && ! str_starts_with($user->avatar_url, 'http://') && ! str_starts_with($user->avatar_url, 'https://')) {
-            Storage::disk('public')->delete($user->avatar_url);
+            Storage::delete($user->avatar_url);
         }
 
         $user->avatar_url = $path;
@@ -246,7 +247,7 @@ class UserProfileApiController extends Controller
 
         // Delete photo if stored on local disk
         if ($user->avatar_url && ! str_starts_with($user->avatar_url, 'http://') && ! str_starts_with($user->avatar_url, 'https://')) {
-            Storage::disk('public')->delete($user->avatar_url);
+            Storage::delete($user->avatar_url);
         }
 
         $user->delete();

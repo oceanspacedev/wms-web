@@ -117,7 +117,7 @@ class TrackingOrderApiTest extends TestCase
     public function test_courier_records_every_column_in_one_request_at_the_receiving_point(): void
     {
         $courier = $this->actAsCourier();
-        Storage::fake('public');
+        Storage::fake();
 
         $payload = [
             'no_sj' => 'SJ-MOBILE-NEW-999',
@@ -161,8 +161,10 @@ class TrackingOrderApiTest extends TestCase
         $this->assertSame('Ibu Siti (Kepala Toko)', $order->nama_penerima);
         $this->assertSame('2026-10-01', $order->tanggal_nota->toDateString());
         $this->assertEquals(-6.917464, $order->latitude);
-        Storage::disk('public')->assertExists($order->foto_nota_sj);
-        Storage::disk('public')->assertExists($order->foto_penerima);
+        Storage::assertExists($order->foto_nota_sj);
+        Storage::assertExists($order->foto_penerima);
+        $this->assertMatchesRegularExpression('#^tracking-orders/nota/sj-mobile-new-999_nota_\d{8}-\d{6}_[a-z0-9]{5}\.jpg$#', $order->foto_nota_sj);
+        $this->assertMatchesRegularExpression('#^tracking-orders/penerima/sj-mobile-new-999_penerima_\d{8}-\d{6}_[a-z0-9]{5}\.jpg$#', $order->foto_penerima);
     }
 
     public function test_submit_pod_endpoints_are_gone(): void

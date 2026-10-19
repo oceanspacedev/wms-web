@@ -2,13 +2,16 @@
 
 namespace App\Filament\Resources\TrackingOrders\Schemas;
 
+use App\Support\MediaFileName;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class TrackingOrderForm
 {
@@ -101,7 +104,7 @@ class TrackingOrderForm
                                     ->label('Foto Nota Surat Jalan')
                                     ->image()
                                     ->directory('tracking-orders/nota')
-                                    ->visibility('public')
+                                    ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => MediaFileName::make($file, $get('no_sj'), 'nota'))
                                     ->openable()
                                     ->downloadable(),
 
@@ -109,7 +112,7 @@ class TrackingOrderForm
                                     ->label('Foto Penerima')
                                     ->image()
                                     ->directory('tracking-orders/penerima')
-                                    ->visibility('public')
+                                    ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => MediaFileName::make($file, $get('no_sj'), 'penerima'))
                                     ->openable()
                                     ->downloadable(),
                             ]),

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PurchaseOrders\Schemas;
 
 use App\Models\PurchaseOrder;
+use App\Support\MediaFileName;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
@@ -12,6 +13,7 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class PurchaseOrderForm
 {
@@ -161,7 +163,7 @@ class PurchaseOrderForm
                                     ->label('Foto DO')
                                     ->image()
                                     ->directory('purchase-orders/do')
-                                    ->visibility('public')
+                                    ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => MediaFileName::make($file, $get('no_do'), 'do'))
                                     ->openable()
                                     ->downloadable()
                                     ->required(),
@@ -170,7 +172,7 @@ class PurchaseOrderForm
                                     ->label('Foto Resi (opsional)')
                                     ->image()
                                     ->directory('purchase-orders/resi')
-                                    ->visibility('public')
+                                    ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => MediaFileName::make($file, $get('no_do'), 'resi'))
                                     ->openable()
                                     ->downloadable(),
 
@@ -178,7 +180,7 @@ class PurchaseOrderForm
                                     ->label('Foto Penerimaan')
                                     ->image()
                                     ->directory('purchase-orders/penerimaan')
-                                    ->visibility('public')
+                                    ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => MediaFileName::make($file, $get('no_do'), 'penerimaan'))
                                     ->openable()
                                     ->downloadable()
                                     ->required(),

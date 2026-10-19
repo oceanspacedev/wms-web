@@ -3,9 +3,9 @@
 namespace App\Http\Resources\Api\V1;
 
 use App\Models\PurchaseOrder;
+use App\Support\MediaUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -77,18 +77,10 @@ class PurchaseOrderResource extends JsonResource
      */
     protected function resolvePhotoUrl(?string $path, string $directory): ?string
     {
-        if (blank($path)) {
-            return null;
+        if (filled($path) && ! Str::startsWith($path, ['http://', 'https://', 'purchase-orders/'])) {
+            $path = "{$directory}/{$path}";
         }
 
-        if (Str::startsWith($path, ['http://', 'https://'])) {
-            return $path;
-        }
-
-        if (Str::startsWith($path, 'purchase-orders/')) {
-            return Storage::disk('public')->url($path);
-        }
-
-        return Storage::disk('public')->url("{$directory}/{$path}");
+        return MediaUrl::for($path);
     }
 }

@@ -22,7 +22,6 @@ class UsersTable
                 ImageColumn::make('avatar_url')
                     ->label('Foto')
                     ->circular()
-                    ->disk('public')
                     ->defaultImageUrl(fn (User $record): string => filament()->getUserAvatarUrl($record)),
                 TextColumn::make('name')
                     ->searchable()

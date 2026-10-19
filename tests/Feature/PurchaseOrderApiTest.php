@@ -91,7 +91,7 @@ class PurchaseOrderApiTest extends TestCase
     public function test_warehouse_records_do_resi_and_receiving_photo_in_one_request_without_knowing_the_po(): void
     {
         $user = $this->actAsUser();
-        Storage::fake('public');
+        Storage::fake();
 
         $payload = [
             'no_do' => '20240506_63',
@@ -148,15 +148,18 @@ class PurchaseOrderApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.id', $po->id)
             ->assertJsonPath('data.no_do', '20240506_63');
-        Storage::disk('public')->assertExists($po->foto_do);
-        Storage::disk('public')->assertExists($po->foto_resi);
-        Storage::disk('public')->assertExists($po->foto_penerimaan);
+        Storage::assertExists($po->foto_do);
+        Storage::assertExists($po->foto_resi);
+        Storage::assertExists($po->foto_penerimaan);
+        $this->assertMatchesRegularExpression('#^purchase-orders/do/20240506-63_do_\d{8}-\d{6}_[a-z0-9]{5}\.jpg$#', $po->foto_do);
+        $this->assertMatchesRegularExpression('#^purchase-orders/resi/20240506-63_resi_\d{8}-\d{6}_[a-z0-9]{5}\.jpg$#', $po->foto_resi);
+        $this->assertMatchesRegularExpression('#^purchase-orders/penerimaan/20240506-63_penerimaan_\d{8}-\d{6}_[a-z0-9]{5}\.jpg$#', $po->foto_penerimaan);
     }
 
     public function test_resi_is_optional_for_goods_delivered_by_the_supplier_fleet(): void
     {
         $this->actAsUser();
-        Storage::fake('public');
+        Storage::fake();
 
         $this->postJson('/api/purchase-orders', [
             'no_po' => 'PO-ARMADA-01',
@@ -173,7 +176,7 @@ class PurchaseOrderApiTest extends TestCase
     public function test_short_or_damaged_receipt_needs_a_note(): void
     {
         $this->actAsUser();
-        Storage::fake('public');
+        Storage::fake();
 
         $payload = [
             'no_po' => 'PO-KURANG-01',

@@ -235,7 +235,18 @@ Melalui **Filament Shield**, akses fitur dibagi secara hierarkis:
    ```bash
    cp .env.example .env
    php artisan key:generate
+   php artisan storage:link
    ```
+
+   Foto (surat jalan, PO, avatar) disimpan di disk `FILESYSTEM_DISK` dan dipakai bersama oleh API sam-app dan panel Filament:
+
+   - `public`: URL biasa `APP_URL/storage/...` (butuh `storage:link`).
+   - `local`: URL bertanda tangan sementara, file tidak bisa diakses tanpa link dari aplikasi.
+   - `s3`: presigned URL sementara; butuh `composer require league/flysystem-aws-s3-v3 "^3.0"` dan variabel `AWS_*`.
+
+   Nama file foto dibuat mudah diaudit (`App\Support\MediaFileName`): `{identitas}_{jenis}_{Ymd-His}_{hash5}.{ext}`, misalnya `tracking-orders/nota/sj-2026-001_nota_20261019-143005_k3x9q.jpg`. Identitas = no SJ (surat jalan), no DO (PO), atau username (avatar).
+
+   Pastikan `APP_URL` sama dengan URL yang dibuka di browser. Saat mengganti disk, pindahkan file lama ke disk baru dengan struktur folder yang sama.
 
 4. **Jalankan Migrasi Basis Data & Setup Role Permission:**
    ```bash

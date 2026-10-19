@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Users\Schemas;
 
 use App\Models\User;
+use App\Support\MediaFileName;
 use App\Support\ShipmentOptions;
 use App\Support\WhatsAppNumber;
 use Closure;
@@ -11,9 +12,11 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class UserForm
 {
@@ -127,8 +130,7 @@ class UserForm
                                 ->avatar()
                                 ->alignCenter()
                                 ->directory('avatars')
-                                ->disk('public')
-                                ->visibility('public')
+                                ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => MediaFileName::make($file, $get('username') ?: $get('name'), 'avatar'))
                                 ->imageEditor()
                                 ->circleCropper()
                                 ->maxSize(2048),

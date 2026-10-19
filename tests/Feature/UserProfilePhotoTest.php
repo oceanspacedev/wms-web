@@ -32,8 +32,10 @@ class UserProfilePhotoTest extends TestCase
         $this->assertNull($userWithoutAvatar->getFilamentAvatarUrl());
 
         $userWithLocalAvatar = User::factory()->create(['avatar_url' => 'avatars/profile.png']);
-        $expectedUrl = Storage::disk('public')->url('avatars/profile.png');
-        $this->assertSame($expectedUrl, $userWithLocalAvatar->getFilamentAvatarUrl());
+        $this->assertSame(
+            rtrim(config('app.url'), '/').'/storage/avatars/profile.png',
+            $userWithLocalAvatar->getFilamentAvatarUrl(),
+        );
 
         $userWithExternalAvatar = User::factory()->create(['avatar_url' => 'https://example.com/avatar.png']);
         $this->assertSame('https://example.com/avatar.png', $userWithExternalAvatar->getFilamentAvatarUrl());
@@ -85,7 +87,7 @@ class UserProfilePhotoTest extends TestCase
 
     public function test_user_can_save_avatar_on_profile_page(): void
     {
-        Storage::fake('public');
+        Storage::fake();
         $user = $this->userAdmin();
         $this->actingAs($user);
 
@@ -100,7 +102,7 @@ class UserProfilePhotoTest extends TestCase
 
         $user->refresh();
         $this->assertNotNull($user->avatar_url);
-        Storage::disk('public')->assertExists($user->avatar_url);
+        Storage::assertExists($user->avatar_url);
     }
 
     private function userAdmin(): User

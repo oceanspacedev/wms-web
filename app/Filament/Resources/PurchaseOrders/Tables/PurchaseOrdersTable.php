@@ -100,7 +100,6 @@ class PurchaseOrdersTable
 
                 ImageColumn::make('foto_penerimaan')
                     ->label('Foto Penerimaan')
-                    ->disk('public')
                     ->circular()
                     ->checkFileExistence(false)
                     ->toggleable(),

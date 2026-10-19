@@ -3,9 +3,9 @@
 namespace App\Http\Resources\Api\V1;
 
 use App\Models\TrackingOrder;
+use App\Support\MediaUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -65,24 +65,10 @@ class TrackingOrderResource extends JsonResource
      */
     protected function resolvePhotoUrl(?string $path, string $directory): ?string
     {
-        if (blank($path)) {
-            return null;
+        if (filled($path) && ! Str::startsWith($path, ['http://', 'https://', 'tracking-orders/'])) {
+            $path = "{$directory}/{$path}";
         }
 
-        if (Str::startsWith($path, ['http://', 'https://'])) {
-            return $path;
-        }
-
-        // If path already contains subfolder
-        if (Str::startsWith($path, 'tracking-orders/')) {
-            return Storage::disk('public')->url($path);
-        }
-
-        // Check if file exists directly in public disk
-        if (Storage::disk('public')->exists("{$directory}/{$path}")) {
-            return Storage::disk('public')->url("{$directory}/{$path}");
-        }
-
-        return Storage::disk('public')->url("{$directory}/{$path}");
+        return MediaUrl::for($path);
     }
 }

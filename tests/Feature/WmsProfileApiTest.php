@@ -179,12 +179,12 @@ class WmsProfileApiTest extends TestCase
 
     public function test_can_update_profile_photo(): void
     {
-        Storage::fake('public');
+        Storage::fake();
 
         $user = User::factory()->create([
             'avatar_url' => 'avatars/old-photo.jpg',
         ]);
-        Storage::disk('public')->put('avatars/old-photo.jpg', 'old-content');
+        Storage::put('avatars/old-photo.jpg', 'old-content');
 
         $photo = UploadedFile::fake()->image('profile.png', 400, 400);
 
@@ -200,13 +200,13 @@ class WmsProfileApiTest extends TestCase
         $user->refresh();
         $this->assertNotNull($user->avatar_url);
         $this->assertNotSame('avatars/old-photo.jpg', $user->avatar_url);
-        Storage::disk('public')->assertExists($user->avatar_url);
-        Storage::disk('public')->assertMissing('avatars/old-photo.jpg');
+        Storage::assertExists($user->avatar_url);
+        Storage::assertMissing('avatars/old-photo.jpg');
     }
 
     public function test_can_update_profile_photo_with_legacy_profile_photo_field(): void
     {
-        Storage::fake('public');
+        Storage::fake();
 
         $user = User::factory()->create();
 
@@ -220,7 +220,7 @@ class WmsProfileApiTest extends TestCase
 
         $user->refresh();
         $this->assertNotNull($user->avatar_url);
-        Storage::disk('public')->assertExists($user->avatar_url);
+        Storage::assertExists($user->avatar_url);
     }
 
     public function test_update_profile_photo_rejects_non_image_file(): void
@@ -313,12 +313,12 @@ class WmsProfileApiTest extends TestCase
 
     public function test_can_delete_account(): void
     {
-        Storage::fake('public');
+        Storage::fake();
 
         $user = User::factory()->create([
             'avatar_url' => 'avatars/my-avatar.jpg',
         ]);
-        Storage::disk('public')->put('avatars/my-avatar.jpg', 'avatar-data');
+        Storage::put('avatars/my-avatar.jpg', 'avatar-data');
         $token = $user->createToken('tracking')->plainTextToken;
 
         $response = $this->withToken($token)->deleteJson('/api/user');
@@ -330,6 +330,6 @@ class WmsProfileApiTest extends TestCase
 
         $this->assertDatabaseMissing('users', ['id' => $user->id]);
         $this->assertSame(0, PersonalAccessToken::count());
-        Storage::disk('public')->assertMissing('avatars/my-avatar.jpg');
+        Storage::assertMissing('avatars/my-avatar.jpg');
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\CreateTrackingOrderRequest;
 use App\Http\Resources\Api\V1\TrackingOrderResource;
 use App\Models\TrackingOrder;
+use App\Support\MediaFileName;
 use Dedoc\Scramble\Attributes\Endpoint;
 use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\QueryParameter;
@@ -45,11 +46,11 @@ class TrackingOrderApiController extends Controller
         ];
 
         if ($request->hasFile('foto_nota_sj')) {
-            $orderData['foto_nota_sj'] = $request->file('foto_nota_sj')->store('tracking-orders/nota', 'public');
+            $orderData['foto_nota_sj'] = MediaFileName::store($request->file('foto_nota_sj'), 'tracking-orders/nota', $orderData['no_sj'], 'nota');
         }
 
         if ($request->hasFile('foto_penerima')) {
-            $orderData['foto_penerima'] = $request->file('foto_penerima')->store('tracking-orders/penerima', 'public');
+            $orderData['foto_penerima'] = MediaFileName::store($request->file('foto_penerima'), 'tracking-orders/penerima', $orderData['no_sj'], 'penerima');
         }
 
         $trackingOrder = TrackingOrder::create($orderData);
