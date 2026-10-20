@@ -3,7 +3,9 @@
 namespace App\Filament\Resources\ExpeditionRateCards\Pages;
 
 use App\Filament\Resources\ExpeditionRateCards\ExpeditionRateCardResource;
-use App\Jobs\ImportRateCardsJob;
+use App\Filament\Resources\ExpeditionRateCards\Widgets\RateCardImportsWidget;
+use App\Jobs\ProcessRateCardImportJob;
+use App\Models\RateCardImport;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
@@ -11,6 +13,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ManageRecords;
+use Filament\Schemas\Components\Livewire;
 
 class ManageExpeditionRateCards extends ManageRecords
 {
@@ -23,17 +26,34 @@ class ManageExpeditionRateCards extends ManageRecords
                 ->label('Tambah Tarif Manual')
                 ->icon(null),
 
+            // Riwayat & status import tampil di modal, tanpa pindah halaman; badge = import yang belum selesai
+            Action::make('importHistory')
+                ->label('Riwayat Import')
+                ->icon(null)
+                ->color('gray')
+                ->visible(fn (): bool => (auth()->user()?->can('viewAny', RateCardImport::class) ?? false) && RateCardImport::query()->exists())
+                ->badge(fn (): ?int => RateCardImport::query()->whereIn('status', ['pending', 'processing'])->count() ?: null)
+                ->badgeColor('warning')
+                ->modalHeading('Riwayat Import')
+                ->modalWidth('5xl')
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Tutup')
+                ->schema([
+                    Livewire::make(RateCardImportsWidget::class),
+                ]),
+
+            // Alurnya sama dengan Import Penjualan CSA: file dicatat di Riwayat Import lalu diproses di antrean
             Action::make('importRateCards')
                 ->label('Import Excel / Spreadsheet')
                 ->icon(null)
                 ->color('success')
+                ->visible(fn (): bool => auth()->user()?->can('create', RateCardImport::class) ?? false)
                 ->modalHeading('Import Tarif Kontrak (Rate Cards)')
-                ->modalDescription('Unggah file spreadsheet Excel (.xlsx, .xls) atau CSV untuk memperbarui data master tarif ekspedisi.')
-                ->modalSubmitActionLabel('Mulai Import Data')
+                ->modalSubmitActionLabel('Upload')
                 ->modalWidth('lg')
-                ->form([
+                ->schema([
                     FileUpload::make('attachment')
-                        ->label('File Spreadsheet (Excel / CSV)')
+                        ->label('File pricelist (Excel / CSV)')
                         ->disk('local')
                         ->directory('rate-card-imports')
                         ->acceptedFileTypes([
@@ -46,42 +66,48 @@ class ManageExpeditionRateCards extends ManageRecords
                         ->maxSize(102400)
                         ->storeFileNamesIn('file_name')
                         ->required()
-                        ->helperText('Mendukung file unduhan Google Sheets / Excel (.xlsx dan .csv) hingga 100 MB. Diproses di belakang layar; hasilnya muncul di notifikasi lonceng.'),
+                        ->helperText('File .xlsx atau .csv hingga 100 MB. Diproses di belakang layar; statusnya terlihat di tombol Riwayat Import.'),
 
                     Select::make('mode')
                         ->label('Metode Import')
                         ->options([
-                            'upsert' => 'Tambahkan & Update data yang sudah ada (Upsert - Rekomendasi)',
-                            'replace' => 'Kosongkan & Gantikan seluruh data (Reset & Import Ulang)',
+                            'upsert' => 'Tambah & update tarif yang sudah ada',
+                            'replace' => 'Kosongkan & ganti semua tarif',
                         ])
                         ->default('upsert')
                         ->required(),
 
                     TextInput::make('default_insurance_percent')
-                        ->label('Default Persentase Asuransi (%)')
+                        ->label('Default premi asuransi')
                         ->numeric()
                         ->default(0.2)
                         ->suffix('%')
                         ->required()
-                        ->helperText('Nilai default premi asuransi jika tidak tertera di baris tarif (cth: 0.2%).'),
+                        ->helperText('Dipakai jika baris tarif tidak mencantumkan premi.'),
                 ])
                 ->action(function (array $data): void {
-                    $attachment = (string) ($data['attachment'] ?? '');
+                    $path = (string) $data['attachment'];
+
+                    $import = RateCardImport::create([
+                        'user_id' => auth()->id(),
+                        'file_name' => (string) ($data['file_name'] ?? basename($path)),
+                        'file_path' => $path,
+                        'mode' => (string) ($data['mode'] ?? 'upsert'),
+                        'default_insurance_percent' => (float) ($data['default_insurance_percent'] ?? 0.2),
+                        'status' => 'pending',
+                    ]);
 
                     // File pricelist ±200 ribu baris; di dalam request web kena 504 Gateway Time-out
-                    ImportRateCardsJob::dispatch(
-                        $attachment,
-                        (string) ($data['file_name'] ?? basename($attachment)),
-                        (string) ($data['mode'] ?? 'upsert'),
-                        (float) ($data['default_insurance_percent'] ?? 0.2),
-                        auth()->id(),
-                    );
+                    ProcessRateCardImportJob::dispatch($import);
 
                     Notification::make()
-                        ->title('Import tarif sedang diproses')
-                        ->body('Berjalan di belakang layar ±1–3 menit. Hasilnya muncul di notifikasi lonceng di kanan atas.')
+                        ->title('File berhasil diunggah')
+                        ->body('Tarif sedang diproses di belakang layar. Status di Riwayat Import akan diperbarui otomatis.')
                         ->success()
                         ->send();
+
+                    // Langsung tampilkan Riwayat Import supaya status prosesnya kelihatan
+                    $this->replaceMountedAction('importHistory');
                 }),
         ];
     }

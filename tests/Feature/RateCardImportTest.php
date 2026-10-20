@@ -6,12 +6,16 @@ namespace Tests\Feature;
 
 use App\Filament\Pages\CheckTariff;
 use App\Filament\Resources\ExpeditionRateCards\Pages\ManageExpeditionRateCards;
-use App\Jobs\ImportRateCardsJob;
+use App\Filament\Resources\ExpeditionRateCards\Widgets\RateCardImportsWidget;
+use App\Jobs\ProcessRateCardImportJob;
 use App\Models\Expedition;
 use App\Models\ExpeditionRateCard;
+use App\Models\RateCardImport;
 use App\Models\User;
 use App\Services\RateCardImportService;
 use BezhanSalleh\FilamentShield\Support\Utils;
+use Exception;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
@@ -44,7 +48,10 @@ class RateCardImportTest extends TestCase
             'name' => 'View:CheckTariff',
             'guard_name' => 'web',
         ]);
-        $role->givePermissionTo(['ViewAny:ExpeditionRateCard', 'View:CheckTariff']);
+        foreach (['ViewAny:RateCardImport', 'Create:RateCardImport', 'Delete:RateCardImport'] as $permission) {
+            Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'web']);
+        }
+        $role->givePermissionTo(['ViewAny:ExpeditionRateCard', 'View:CheckTariff', 'ViewAny:RateCardImport', 'Create:RateCardImport', 'Delete:RateCardImport']);
 
         $this->user = User::factory()->create();
         $this->user->assignRole($role);
@@ -184,7 +191,7 @@ class RateCardImportTest extends TestCase
         ]);
     }
 
-    public function test_import_action_runs_in_the_background(): void
+    public function test_import_button_on_rate_cards_page_records_the_upload_and_queues_it(): void
     {
         Queue::fake();
         Storage::fake('local');
@@ -197,28 +204,111 @@ class RateCardImportTest extends TestCase
                 'default_insurance_percent' => 0.2,
             ])
             ->assertHasNoFormErrors()
-            ->assertNotified('Import tarif sedang diproses');
+            ->assertNotified('File berhasil diunggah')
+            // Riwayat Import langsung terbuka supaya status prosesnya kelihatan
+            ->assertActionMounted('importHistory');
 
-        // File ±200 ribu baris tidak lagi diproses di dalam request (dulu kena 504 Gateway Time-out)
+        // File ±200 ribu baris tidak diproses di dalam request (dulu kena 504 Gateway Time-out)
         $this->assertSame(0, ExpeditionRateCard::count());
-        Queue::assertPushed(ImportRateCardsJob::class, fn (ImportRateCardsJob $job): bool => $job->fileName === 'PRICELIST ALL EKSPEDISI.csv'
-            && $job->mode === 'replace'
-            && $job->userId === $this->user->id
-            && Storage::disk('local')->exists($job->path));
+
+        $import = RateCardImport::sole();
+        $this->assertSame('PRICELIST ALL EKSPEDISI.csv', $import->file_name);
+        $this->assertSame('replace', $import->mode);
+        $this->assertSame('pending', $import->status);
+        $this->assertSame($this->user->id, $import->user_id);
+        Storage::disk('local')->assertExists($import->file_path);
+        Queue::assertPushed(ProcessRateCardImportJob::class, fn (ProcessRateCardImportJob $job): bool => $job->import->is($import));
     }
 
-    public function test_import_job_saves_prices_as_written_and_notifies_the_uploader(): void
+    public function test_import_history_button_opens_the_status_table_in_a_modal(): void
+    {
+        Storage::fake('local');
+        $this->actingAs($this->user);
+
+        // Belum pernah import: tombolnya tidak ditampilkan supaya halaman tetap bersih
+        Livewire::test(ManageExpeditionRateCards::class)->assertActionHidden('importHistory');
+
+        $import = $this->pendingImport('rate-card-imports/pricelist.csv');
+
+        Livewire::test(ManageExpeditionRateCards::class)
+            ->assertActionVisible('importHistory')
+            ->mountAction('importHistory')
+            ->assertActionMounted('importHistory');
+
+        Livewire::test(RateCardImportsWidget::class)
+            ->assertCanSeeTableRecords([$import])
+            ->assertSee('Menunggu Antrean');
+    }
+
+    public function test_import_job_saves_prices_as_written_and_completes_the_history(): void
     {
         Storage::fake('local');
         Storage::disk('local')->put('rate-card-imports/pricelist.csv', $this->priceListCsv());
+        $import = $this->pendingImport('rate-card-imports/pricelist.csv');
 
-        (new ImportRateCardsJob('rate-card-imports/pricelist.csv', 'PRICELIST ALL EKSPEDISI.csv', 'upsert', 0.2, $this->user->id))
-            ->handle(app(RateCardImportService::class));
+        (new ProcessRateCardImportJob($import))->handle(app(RateCardImportService::class));
 
         // Angka mentah "1500.0" dari export Excel tetap Rp1.500, bukan Rp15.000
         $this->assertDatabaseHas('expedition_rate_cards', ['destination_city' => 'BOGOR', 'rate_per_kg' => 1500, 'min_kg' => 10]);
         Storage::disk('local')->assertMissing('rate-card-imports/pricelist.csv');
+
+        $import->refresh();
+        $this->assertSame('completed', $import->status);
+        $this->assertSame(1, $import->total_rows);
+        $this->assertSame(1, $import->total_created);
+        $this->assertNotNull($import->finished_at);
         $this->assertSame('Import tarif selesai', $this->user->notifications()->sole()->data['title']);
+    }
+
+    public function test_failed_import_keeps_the_file_and_can_be_reprocessed(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        Storage::disk('local')->put('rate-card-imports/salah.csv', "NAMA,ALAMAT\nA,B");
+        $import = $this->pendingImport('rate-card-imports/salah.csv');
+        $job = new ProcessRateCardImportJob($import);
+
+        try {
+            $job->handle(app(RateCardImportService::class));
+            $this->fail('Import file tanpa kolom tarif seharusnya gagal');
+        } catch (Exception $exception) {
+            $job->failed($exception);
+        }
+
+        $import->refresh();
+        $this->assertSame('failed', $import->status);
+        $this->assertStringContainsString('Header kolom tidak dikenali', (string) $import->error_message);
+        Storage::disk('local')->assertExists('rate-card-imports/salah.csv');
+        $this->assertSame('Import tarif gagal', $this->user->notifications()->sole()->data['title']);
+
+        Livewire::actingAs($this->user)
+            ->test(RateCardImportsWidget::class)
+            ->callAction(TestAction::make('reprocess')->table($import));
+
+        $this->assertSame('pending', $import->refresh()->status);
+        Queue::assertPushed(ProcessRateCardImportJob::class);
+    }
+
+    public function test_deleting_an_import_removes_its_file(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('rate-card-imports/lama.csv', $this->priceListCsv());
+
+        $this->pendingImport('rate-card-imports/lama.csv')->delete();
+
+        Storage::disk('local')->assertMissing('rate-card-imports/lama.csv');
+    }
+
+    private function pendingImport(string $path): RateCardImport
+    {
+        return RateCardImport::create([
+            'user_id' => $this->user->id,
+            'file_name' => 'PRICELIST ALL EKSPEDISI.csv',
+            'file_path' => $path,
+            'mode' => 'upsert',
+            'default_insurance_percent' => 0.2,
+            'status' => 'pending',
+        ]);
     }
 
     private function priceListCsv(): string

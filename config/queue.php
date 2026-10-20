@@ -40,7 +40,9 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            // Harus lebih lama dari timeout job terpanjang (import 1800 detik); kalau lebih pendek, job import yang
+            // masih berjalan diambil worker lain lalu ditandai gagal "attempted too many times"
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 1900),
             'after_commit' => false,
         ],
 
@@ -68,7 +70,8 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            // Dipakai Horizon (production); sama seperti database: lebih lama dari timeout import 1800 detik
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 1900),
             'block_for' => null,
             'after_commit' => false,
         ],
