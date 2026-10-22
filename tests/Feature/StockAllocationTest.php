@@ -194,10 +194,10 @@ class StockAllocationTest extends TestCase
 
         Livewire::test(ViewStockAllocation::class, ['record' => $allocation->getRouteKey()])
             ->assertOk()
-            ->assertSee('Saran Transfer')
-            ->assertSee('300 unit')
-            ->assertSee('325 unit')
             ->assertSee('5 gudang · 1 SKU · target DOS 30 hari')
+            // Kartu ringkasan tidak ada lagi; angka totalnya ada di daftar Alokasi Stok
+            ->assertDontSee(['PO Awal', 'Sisa PO', '325 unit'])
+            ->assertSeeLivewire(TransfersRelationManager::class)
             // Nama file yang panjang tidak ditampilkan di header detail
             ->assertDontSee('DOS Oktober');
 

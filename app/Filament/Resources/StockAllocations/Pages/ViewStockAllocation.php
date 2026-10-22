@@ -15,6 +15,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Schema;
 use Filament\Support\Enums\IconPosition;
 use Filament\Support\Enums\Width;
 use Illuminate\Contracts\Support\Htmlable;
@@ -31,6 +32,16 @@ class ViewStockAllocation extends ViewRecord
     public function refreshSummary(): void
     {
         $this->record->refresh();
+    }
+
+    /**
+     * Cukup tab Saran Transfer, Per Gudang & Dokumen Mutasi: total unit & PO sudah ada di daftar Alokasi Stok.
+     */
+    public function content(Schema $schema): Schema
+    {
+        return $schema->components([
+            $this->getRelationManagersContentComponent(),
+        ]);
     }
 
     public function getTitle(): string|Htmlable
