@@ -5,7 +5,9 @@ namespace App\Filament\Resources\StockAllocations\Pages;
 use App\Filament\Resources\StockAllocations\Actions\ExportAllocationAction;
 use App\Filament\Resources\StockAllocations\StockAllocationResource;
 use App\Models\StockAllocation;
+use App\Models\StockAllocationTransfer;
 use App\Services\StockAllocationService;
+use App\Services\StockMutationService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
@@ -36,24 +38,63 @@ class ViewStockAllocation extends ViewRecord
         return 'Alokasi Stok';
     }
 
+    /**
+     * Nama file bisa sangat panjang, jadi tidak ditampilkan di header (tetap terlihat di daftar Alokasi Stok).
+     */
     public function getSubheading(): ?string
     {
         return implode(' · ', array_filter([
-            $this->record->name,
             $this->record->created_at?->format('d/m/Y H:i'),
+            $this->record->warehouse_count.' gudang',
+            $this->record->sku_count.' SKU',
+            'target DOS '.$this->record->target_dos.' hari',
         ]));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function getBreadcrumbs(): array
+    {
+        return [
+            StockAllocationResource::getUrl() => 'Alokasi Stok',
+            'Detail',
+        ];
     }
 
     protected function getHeaderActions(): array
     {
         return [
             ActionGroup::make([
+                // Saran yang disetujui → dokumen mutasi per rute (tab Dokumen Mutasi)
+                Action::make('createMutations')
+                    ->label('Buat Dokumen Mutasi')
+                    ->icon('heroicon-o-document-text')
+                    ->visible(fn (): bool => (auth()->user()?->can('update', $this->record) ?? false)
+                        && $this->record->transfers()->where('status', StockAllocationTransfer::STATUS_APPROVED)->whereNull('stock_mutation_id')->exists())
+                    ->requiresConfirmation()
+                    ->modalHeading('Buat Dokumen Mutasi')
+                    ->modalDescription('Saran yang sudah disetujui dikelompokkan per rute gudang. Setelah masuk dokumen, saran tersebut tidak bisa diubah lagi.')
+                    ->modalSubmitActionLabel('Buat')
+                    ->action(function (): void {
+                        $mutations = app(StockMutationService::class)->createFromApproved($this->record, auth()->id());
+
+                        Notification::make()
+                            ->title($mutations->count().' dokumen mutasi dibuat')
+                            ->body($mutations->pluck('number')->implode(', '))
+                            ->success()
+                            ->send();
+
+                        $this->redirect(StockAllocationResource::getUrl('view', ['record' => $this->record, 'activeRelationManager' => 2]));
+                    }),
+
                 ExportAllocationAction::make(),
 
+                // Sudah ada dokumen mutasi: saran tidak dihitung ulang supaya dokumennya tetap cocok
                 Action::make('recalculate')
                     ->label('Hitung Ulang')
                     ->icon('heroicon-o-arrow-path')
-                    ->visible(fn (): bool => auth()->user()?->can('update', $this->record) ?? false)
+                    ->visible(fn (): bool => (auth()->user()?->can('update', $this->record) ?? false) && ! $this->record->mutations()->exists())
                     ->modalHeading('Hitung Ulang Alokasi')
                     ->modalDescription('Saran transfer dihitung ulang dari data yang sama. Persetujuan sebelumnya ikut direset.')
                     ->modalWidth(Width::Medium)

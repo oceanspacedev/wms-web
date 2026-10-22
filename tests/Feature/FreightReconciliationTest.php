@@ -10,6 +10,7 @@ use App\Jobs\ProcessFreightReconciliationJob;
 use App\Models\Expedition;
 use App\Models\ExpeditionRateCard;
 use App\Models\FreightInvoice;
+use App\Models\FreightInvoiceItem;
 use App\Models\User;
 use App\Services\FreightReconciliationService;
 use BezhanSalleh\FilamentShield\Support\Utils;
@@ -347,7 +348,7 @@ class FreightReconciliationTest extends TestCase
         Queue::assertPushed(ProcessFreightReconciliationJob::class, fn (ProcessFreightReconciliationJob $job): bool => $job->invoice->is($invoice));
     }
 
-    public function test_detail_page_shows_the_invoice_summary(): void
+    public function test_detail_page_shows_the_invoice_header_and_only_the_resi_table(): void
     {
         $role = Role::firstOrCreate(['name' => Utils::getSuperAdminName(), 'guard_name' => 'web']);
         foreach (['ViewAny:FreightInvoice', 'View:FreightInvoice'] as $permission) {
@@ -374,8 +375,10 @@ class FreightReconciliationTest extends TestCase
         ]);
 
         Livewire::test(ViewFreightInvoice::class, ['record' => $invoice->getRouteKey()])
-            ->assertSee(['Informasi Invoice', 'Ringkasan Tagihan', 'JAKARTA', 'Selesai Diaudit'])
-            ->assertSee(['164 resi sesuai Tarif Kontrak', '3 resi perlu dicek', '6 resi, tarif belum ada']);
+            ->assertSee(['INV-21-SEP', $this->expedition->name, 'asal JAKARTA', '19/10/2026', 'Selesai Diaudit'])
+            // Total tagihan cukup di daftar invoice dan Aksi › Penjelasan Angka
+            ->assertDontSee(['Informasi Invoice', 'Ringkasan Tagihan', 'Total Ditagih', '164 resi sesuai Tarif Kontrak'])
+            ->assertSeeLivewire(ItemsRelationManager::class);
     }
 
     public function test_explanation_menu_breaks_down_the_totals(): void
@@ -400,6 +403,19 @@ class FreightReconciliationTest extends TestCase
         Livewire::test(ListFreightInvoices::class)
             ->mountAction(TestAction::make('explainTotals')->table($invoice))
             ->assertMountedActionModalSee(['Ditagih = Disetujui + Koreksi + Belum Terverifikasi', 'TARIF BELUM ADA', 'Rp 12.426.500', 'Tambah tarif / setujui manual']);
+    }
+
+    public function test_each_line_that_is_not_paid_in_full_shows_a_short_reason(): void
+    {
+        $item = fn (array $attributes): FreightInvoiceItem => new FreightInvoiceItem($attributes + ['billed_insurance' => 0]);
+
+        // ECO Jakarta → Palembang belum ada tarifnya; DARAT minimal 10 kg × Rp 3.000 = Rp 30.000
+        $this->assertSame('Harusnya DARAT: 10 kg × Rp 3.000', $item(['audit_status' => 'revisi_darat', 'billed_rate' => 31000, 'agreed_rate' => 3000, 'billed_total' => 62000, 'expected_total' => 30000])->reason());
+        $this->assertSame('Tarif lebih mahal Rp 500/kg dari kontrak', $item(['audit_status' => 'discrepancy_rate', 'billed_rate' => 2000, 'agreed_rate' => 1500, 'billed_total' => 20000, 'expected_total' => 15000])->reason());
+        $this->assertSame('Berat harusnya 10 kg', $item(['audit_status' => 'discrepancy_weight', 'billed_rate' => 1500, 'agreed_rate' => 1500, 'billed_total' => 27000, 'expected_total' => 15000])->reason());
+        $this->assertSame('Belum terverifikasi: tarif rute belum ada', $item(['audit_status' => 'missing_rate', 'billed_total' => 48000, 'expected_total' => 0])->reason());
+        $this->assertSame('Disetujui manual: Charter 2,5 jt', $item(['audit_status' => 'missing_rate', 'manual_approved_at' => now(), 'manual_note' => 'Charter 2,5 jt'])->reason());
+        $this->assertNull($item(['audit_status' => 'matched', 'billed_rate' => 1500, 'agreed_rate' => 1500, 'billed_total' => 15000, 'expected_total' => 15000])->reason());
     }
 
     /**

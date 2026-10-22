@@ -33,17 +33,20 @@ class LinesRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('product_name')
+            // Judul sudah ada di tab, jadi tidak diulang di atas tabel
+            ->heading(null)
             ->defaultSort(fn (Builder $query): Builder => $query->orderBy('region')->orderBy('warehouse')->orderBy('product_name'))
             ->paginated([25, 50, 100])
             ->columns([
+                // Region & kode SKU muncul saat kursor diarahkan, supaya tabel tidak penuh teks
                 TextColumn::make('warehouse')
                     ->label('Gudang')
                     ->weight('bold')
-                    ->description(fn (StockAllocationLine $record): string => $record->region)
+                    ->tooltip(fn (StockAllocationLine $record): string => $record->region)
                     ->sortable(),
                 TextColumn::make('product_name')
                     ->label('Produk')
-                    ->description(fn (StockAllocationLine $record): string => $record->sku)
+                    ->tooltip(fn (StockAllocationLine $record): string => $record->sku)
                     ->searchable(['product_name', 'sku'])
                     ->wrap(),
                 TextColumn::make('stock')
@@ -61,7 +64,7 @@ class LinesRelationManager extends RelationManager
                     ->label('DOS')
                     ->state(fn (StockAllocationLine $record): string => $record->dos_before === null
                         ? '–'
-                        : StockAllocationResource::days($record->dos_before).' → '.StockAllocationResource::days($record->dos_after).' hr')
+                        : StockAllocationResource::days($record->dos_before).' → '.StockAllocationResource::days($record->dos_after))
                     ->sortable(['dos_before']),
                 TextColumn::make('status')
                     ->label('Status')

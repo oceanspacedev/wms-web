@@ -15,40 +15,31 @@ class StockAllocationInfolist
         return $schema
             ->columns(1)
             ->components([
-                // Kebutuhan PO Awal − unit yang tertutup transfer = Sisa PO
-                Section::make('Ringkasan')
-                    ->columns(['default' => 1, 'sm' => 2, 'lg' => 4])
+                // Satu kartu tanpa judul: PO Awal − unit yang tertutup transfer = Sisa PO
+                Section::make()
+                    ->columns(['default' => 1, 'sm' => 3])
                     ->schema([
                         TextEntry::make('transfer_qty')
                             ->label('Saran Transfer')
                             ->formatStateUsing(fn ($state): string => StockAllocationResource::units($state))
                             ->size('lg')
                             ->weight('bold')
-                            ->belowContent(fn (StockAllocation $record): string => $record->transfer_count.' transfer antar gudang'),
+                            ->belowContent(fn (StockAllocation $record): string => $record->transfer_count.' transfer'),
 
                         TextEntry::make('po_qty_before')
-                            ->label('Kebutuhan PO Awal')
+                            ->label('PO Awal')
                             ->formatStateUsing(fn ($state): string => StockAllocationResource::units($state))
                             ->size('lg')
-                            ->weight('bold')
-                            ->belowContent('sebelum transfer'),
+                            ->weight('bold'),
 
                         TextEntry::make('po_qty_after')
                             ->label('Sisa PO')
                             ->formatStateUsing(fn ($state): string => StockAllocationResource::units($state))
                             ->size('lg')
                             ->weight('bold')
-                            ->belowContent(fn (StockAllocation $record): string => $record->poReductionPercent() > 0
-                                ? 'turun '.$record->poReductionPercent().'% berkat transfer'
-                                : 'setelah transfer'),
-
-                        TextEntry::make('target_dos')
-                            ->label('Target DOS')
-                            ->formatStateUsing(fn ($state): string => $state.' hari')
-                            ->size('lg')
-                            ->weight('bold')
-                            ->belowContent(fn (StockAllocation $record): string => 'min. transfer '.StockAllocationResource::units($record->min_transfer_qty)
-                                .' · '.$record->warehouse_count.' gudang · '.$record->sku_count.' SKU'),
+                            ->belowContent(fn (StockAllocation $record): ?string => $record->poReductionPercent() > 0
+                                ? 'turun '.$record->poReductionPercent().'%'
+                                : null),
                     ]),
             ]);
     }

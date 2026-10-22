@@ -62,6 +62,14 @@ class StockAllocation extends Model
     }
 
     /**
+     * @return HasMany<StockMutation, $this>
+     */
+    public function mutations(): HasMany
+    {
+        return $this->hasMany(StockMutation::class);
+    }
+
+    /**
      * @return BelongsTo<User, $this>
      */
     public function creator(): BelongsTo

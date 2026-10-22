@@ -63,14 +63,7 @@ class FreightInvoicesTable
                         'paid' => 'gray',
                         default => 'warning',
                     })
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'approved' => 'Disetujui',
-                        'audited' => 'Selesai Diaudit',
-                        'processing' => 'Sedang Diaudit',
-                        'disputed' => 'Ada Selisih / Sanggahan',
-                        'paid' => 'Sudah Dibayar',
-                        default => 'Draft',
-                    }),
+                    ->formatStateUsing(fn (string $state): string => FreightInvoice::STATUS_LABELS[$state] ?? 'Draft'),
 
                 TextColumn::make('total_items_count')
                     ->label('Total Resi')

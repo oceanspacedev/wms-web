@@ -8,7 +8,6 @@ use App\Filament\Resources\FreightInvoices\Pages\ListFreightInvoices;
 use App\Filament\Resources\FreightInvoices\Pages\ViewFreightInvoice;
 use App\Filament\Resources\FreightInvoices\RelationManagers\ItemsRelationManager;
 use App\Filament\Resources\FreightInvoices\Schemas\FreightInvoiceForm;
-use App\Filament\Resources\FreightInvoices\Schemas\FreightInvoiceInfolist;
 use App\Filament\Resources\FreightInvoices\Tables\FreightInvoicesTable;
 use App\Models\FreightInvoice;
 use BackedEnum;
@@ -36,11 +35,6 @@ class FreightInvoiceResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return FreightInvoiceForm::configure($schema);
-    }
-
-    public static function infolist(Schema $schema): Schema
-    {
-        return FreightInvoiceInfolist::configure($schema);
     }
 
     public static function table(Table $table): Table

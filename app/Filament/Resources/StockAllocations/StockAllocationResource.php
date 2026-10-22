@@ -5,6 +5,7 @@ namespace App\Filament\Resources\StockAllocations;
 use App\Filament\Resources\StockAllocations\Pages\ListStockAllocations;
 use App\Filament\Resources\StockAllocations\Pages\ViewStockAllocation;
 use App\Filament\Resources\StockAllocations\RelationManagers\LinesRelationManager;
+use App\Filament\Resources\StockAllocations\RelationManagers\MutationsRelationManager;
 use App\Filament\Resources\StockAllocations\RelationManagers\TransfersRelationManager;
 use App\Filament\Resources\StockAllocations\Schemas\StockAllocationInfolist;
 use App\Filament\Resources\StockAllocations\Tables\StockAllocationsTable;
@@ -48,6 +49,7 @@ class StockAllocationResource extends Resource
         return [
             TransfersRelationManager::class,
             LinesRelationManager::class,
+            MutationsRelationManager::class,
         ];
     }
 

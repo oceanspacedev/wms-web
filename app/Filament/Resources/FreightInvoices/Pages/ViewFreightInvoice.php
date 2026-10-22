@@ -5,12 +5,16 @@ namespace App\Filament\Resources\FreightInvoices\Pages;
 use App\Filament\Resources\FreightInvoices\Actions\ExplainTotalsAction;
 use App\Filament\Resources\FreightInvoices\Actions\ReauditAction;
 use App\Filament\Resources\FreightInvoices\FreightInvoiceResource;
+use App\Models\FreightInvoice;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Schema;
 use Filament\Support\Enums\IconPosition;
+use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Support\HtmlString;
 use Livewire\Attributes\On;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -22,6 +26,42 @@ class ViewFreightInvoice extends ViewRecord
     public function refreshSummary(): void
     {
         $this->record->refresh();
+    }
+
+    /**
+     * Cukup tabel Cek Tarif per Resi: total tagihan sudah ada di daftar invoice dan Aksi › Penjelasan Angka.
+     */
+    public function content(Schema $schema): Schema
+    {
+        return $schema->components([
+            $this->getRelationManagersContentComponent(),
+        ]);
+    }
+
+    public function getTitle(): string|Htmlable
+    {
+        return $this->record->invoice_number;
+    }
+
+    /**
+     * Nomor invoice bisa panjang, jadi tampil lebih kecil dari judul halaman biasa.
+     */
+    public function getHeading(): string|Htmlable
+    {
+        return new HtmlString('<span style="font-size:1.375rem;line-height:1.75rem;font-weight:600">'.e($this->record->invoice_number).'</span>');
+    }
+
+    /**
+     * Info invoice dalam satu baris di bawah judul, supaya tidak perlu kotak "Informasi Invoice" lagi.
+     */
+    public function getSubheading(): ?string
+    {
+        return implode(' · ', array_filter([
+            $this->record->expedition?->name,
+            $this->record->origin_city ? 'asal '.$this->record->origin_city : 'kota asal belum dipilih',
+            $this->record->invoice_date?->format('d/m/Y'),
+            FreightInvoice::STATUS_LABELS[$this->record->status] ?? 'Draft',
+        ]));
     }
 
     protected function getHeaderActions(): array

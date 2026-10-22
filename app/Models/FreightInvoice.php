@@ -12,6 +12,18 @@ class FreightInvoice extends Model
     use HasFactory;
 
     /**
+     * @var array<string, string>
+     */
+    public const STATUS_LABELS = [
+        'draft' => 'Draft',
+        'processing' => 'Sedang Diaudit',
+        'audited' => 'Selesai Diaudit',
+        'disputed' => 'Ada Selisih / Sanggahan',
+        'approved' => 'Disetujui',
+        'paid' => 'Sudah Dibayar',
+    ];
+
+    /**
      * @var list<string>
      */
     protected $fillable = [

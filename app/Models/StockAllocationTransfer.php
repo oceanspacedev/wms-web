@@ -20,7 +20,7 @@ class StockAllocationTransfer extends Model
      * @var array<string, string>
      */
     public const STATUS_LABELS = [
-        self::STATUS_PENDING => 'Menunggu',
+        self::STATUS_PENDING => 'Belum disetujui',
         self::STATUS_APPROVED => 'Disetujui',
         self::STATUS_REJECTED => 'Ditolak',
     ];
@@ -49,6 +49,7 @@ class StockAllocationTransfer extends Model
         'suggested_qty',
         'qty',
         'status',
+        'stock_mutation_id',
         'decided_by',
         'decided_at',
     ];
@@ -87,6 +88,22 @@ class StockAllocationTransfer extends Model
     public function toLine(): BelongsTo
     {
         return $this->belongsTo(StockAllocationLine::class, 'to_line_id');
+    }
+
+    /**
+     * @return BelongsTo<StockMutation, $this>
+     */
+    public function mutation(): BelongsTo
+    {
+        return $this->belongsTo(StockMutation::class, 'stock_mutation_id');
+    }
+
+    /**
+     * Sudah masuk dokumen mutasi: keputusan dan qty-nya tidak boleh diubah lagi.
+     */
+    public function isLocked(): bool
+    {
+        return $this->stock_mutation_id !== null;
     }
 
     /**

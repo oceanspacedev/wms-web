@@ -5,13 +5,17 @@ namespace Tests\Feature;
 use App\Filament\Resources\StockAllocations\Pages\ListStockAllocations;
 use App\Filament\Resources\StockAllocations\Pages\ViewStockAllocation;
 use App\Filament\Resources\StockAllocations\RelationManagers\LinesRelationManager;
+use App\Filament\Resources\StockAllocations\RelationManagers\MutationsRelationManager;
 use App\Filament\Resources\StockAllocations\RelationManagers\TransfersRelationManager;
 use App\Models\StockAllocation;
 use App\Models\StockAllocationLine;
 use App\Models\StockAllocationTransfer;
+use App\Models\StockMutation;
 use App\Models\User;
 use App\Services\StockAllocationExporter;
 use App\Services\StockAllocationService;
+use App\Services\StockMutationExporter;
+use App\Services\StockMutationService;
 use App\Services\XlsxReader;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Filament\Actions\Testing\TestAction;
@@ -192,12 +196,17 @@ class StockAllocationTest extends TestCase
             ->assertOk()
             ->assertSee('Saran Transfer')
             ->assertSee('300 unit')
-            ->assertSee('325 unit');
+            ->assertSee('325 unit')
+            ->assertSee('5 gudang · 1 SKU · target DOS 30 hari')
+            // Nama file yang panjang tidak ditampilkan di header detail
+            ->assertDontSee('DOS Oktober');
 
         $transfer = $this->transfer($allocation, 'GTC', 'GTBDG');
 
         Livewire::test(TransfersRelationManager::class, ['ownerRecord' => $allocation, 'pageClass' => ViewStockAllocation::class])
             ->assertCanSeeTableRecords($allocation->transfers)
+            // Unit stok sebelum → sesudah semua transfer: GTC kirim 280 unit, GTBDG terima 290 unit
+            ->assertSee(['stok 400 → 120 · DOS 400 → 120', 'stok 10 → 300 · DOS 1 → 30', 'stok 20 → 0 · tidak laku'])
             ->callAction(TestAction::make('approve')->table($transfer))
             ->assertDispatched('stock-allocation-updated');
 
@@ -251,6 +260,102 @@ class StockAllocationTest extends TestCase
         $this->assertSame(1, $count('Rekomendasi PO'));
 
         @unlink($path);
+    }
+
+    public function test_approved_transfers_become_one_mutation_document_per_route_and_are_locked(): void
+    {
+        $allocation = $this->allocate();
+        $service = app(StockAllocationService::class);
+        $service->decide($allocation, [$this->transfer($allocation, 'GTC', 'GTBDG'), $this->transfer($allocation, 'GTC', 'GTKRW')], StockAllocationTransfer::STATUS_APPROVED, null);
+
+        $mutations = app(StockMutationService::class)->createFromApproved($allocation, null);
+
+        // Yang belum disetujui (GTTSK → GTBDG) tidak ikut
+        $this->assertSame(['GTC → GTBDG', 'GTC → GTKRW'], $mutations->map(fn (StockMutation $m): string => $m->from_warehouse.' → '.$m->to_warehouse)->sort()->values()->all());
+        $this->assertSame(['MUT-'.now()->format('ym').'-001', 'MUT-'.now()->format('ym').'-002'], $mutations->pluck('number')->sort()->values()->all());
+        $this->assertSame(270, (int) StockMutation::where('to_warehouse', 'GTBDG')->sole()->items()->sum('qty'));
+        $this->assertNull($this->transfer($allocation, 'GTTSK', 'GTBDG')->stock_mutation_id);
+
+        // Saran yang sudah masuk dokumen tidak bisa diubah lagi
+        $locked = $this->transfer($allocation, 'GTC', 'GTBDG');
+        $service->decide($allocation, [$locked], StockAllocationTransfer::STATUS_REJECTED, null);
+        $this->assertSame(StockAllocationTransfer::STATUS_APPROVED, $locked->refresh()->status);
+        $this->expectException(RuntimeException::class);
+        $service->changeQty($locked, 5, null);
+    }
+
+    public function test_mutation_is_shipped_then_received_and_a_difference_is_flagged(): void
+    {
+        $allocation = $this->allocate();
+        app(StockAllocationService::class)->decide($allocation, [$this->transfer($allocation, 'GTC', 'GTBDG')], StockAllocationTransfer::STATUS_APPROVED, null);
+        $mutation = app(StockMutationService::class)->createFromApproved($allocation, null)->sole();
+        $this->actingAsAdmin(['ViewAny:StockAllocation', 'View:StockAllocation', 'Update:StockAllocation']);
+
+        $page = ['ownerRecord' => $allocation, 'pageClass' => ViewStockAllocation::class];
+
+        Livewire::test(MutationsRelationManager::class, $page)
+            ->assertCanSeeTableRecords([$mutation])
+            ->assertActionHidden(TestAction::make('receive')->table($mutation))
+            ->callAction(TestAction::make('ship')->table($mutation), data: ['shipped_via' => 'mobil gudang'])
+            ->assertNotified('Dokumen '.$mutation->number.' ditandai dikirim');
+
+        $mutation->refresh();
+        $this->assertSame(StockMutation::STATUS_SHIPPED, $mutation->status);
+        $this->assertSame('mobil gudang', $mutation->shipped_via);
+
+        $item = $mutation->items()->sole();
+
+        Livewire::test(MutationsRelationManager::class, $page)
+            ->callAction(TestAction::make('receive')->table($mutation), data: [
+                'items' => [['id' => $item->id, 'product_name' => $item->product_name, 'qty' => 270, 'received_qty' => 268]],
+                'received_note' => '2 unit dus penyok',
+            ])
+            ->assertHasNoFormErrors();
+
+        $mutation->refresh()->load('items');
+        $this->assertSame(StockMutation::STATUS_RECEIVED, $mutation->status);
+        $this->assertSame(268, $mutation->items->sole()->received_qty);
+        $this->assertTrue($mutation->hasDifference());
+    }
+
+    public function test_detail_page_creates_mutation_documents_and_blocks_recalculation(): void
+    {
+        $allocation = $this->allocate();
+        $this->actingAsAdmin(['ViewAny:StockAllocation', 'View:StockAllocation', 'Update:StockAllocation']);
+
+        Livewire::test(ViewStockAllocation::class, ['record' => $allocation->getRouteKey()])
+            ->assertActionHidden('createMutations');
+
+        app(StockAllocationService::class)->decide($allocation, $allocation->transfers, StockAllocationTransfer::STATUS_APPROVED, null);
+
+        Livewire::test(ViewStockAllocation::class, ['record' => $allocation->getRouteKey()])
+            ->assertActionVisible('createMutations')
+            ->callAction('createMutations')
+            ->assertNotified('3 dokumen mutasi dibuat')
+            ->assertRedirect();
+
+        $this->assertSame(3, $allocation->mutations()->count());
+
+        Livewire::test(ViewStockAllocation::class, ['record' => $allocation->getRouteKey()])
+            ->assertActionHidden('createMutations')
+            ->assertActionHidden('recalculate');
+    }
+
+    public function test_cancelling_a_mutation_unlocks_its_transfers(): void
+    {
+        $allocation = $this->allocate();
+        app(StockAllocationService::class)->decide($allocation, [$this->transfer($allocation, 'GTC', 'GTBDG')], StockAllocationTransfer::STATUS_APPROVED, null);
+        $mutation = app(StockMutationService::class)->createFromApproved($allocation, null)->sole();
+        $path = sys_get_temp_dir().DIRECTORY_SEPARATOR.uniqid('mutasi_').'.xlsx';
+
+        app(StockMutationExporter::class)->write($mutation, $path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+
+        app(StockMutationService::class)->cancel($mutation);
+
+        $this->assertModelMissing($mutation);
+        $this->assertFalse($this->transfer($allocation, 'GTC', 'GTBDG')->isLocked());
     }
 
     /**

@@ -34,6 +34,8 @@ class ItemsRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('no_resi_awb')
+            // Halaman detail hanya berisi tabel ini, jadi tidak perlu judul tabel
+            ->heading(null)
             ->defaultSort('id')
             ->paginated([25, 50, 100])
             ->columns([
@@ -72,7 +74,10 @@ class ItemsRelationManager extends RelationManager
                     ->label('Selisih')
                     ->state(fn (FreightInvoiceItem $record): float => $record->correctionAmount())
                     ->money('IDR', locale: 'id', decimalPlaces: 0)
-                    ->description(fn (FreightInvoiceItem $record): ?string => $record->isUnverified() ? 'belum terverifikasi' : null)
+                    // Alasan singkat di bawah nominal; catatan lengkap muncul saat kursor diarahkan
+                    ->description(fn (FreightInvoiceItem $record): ?string => $record->reason())
+                    ->tooltip(fn (FreightInvoiceItem $record): ?string => $record->reason() ? $this->notes($record) : null)
+                    ->wrap()
                     ->color(fn ($state): string => (float) $state > 0 ? 'danger' : 'gray'),
                 TextColumn::make('audit_notes')
                     ->label('Catatan')

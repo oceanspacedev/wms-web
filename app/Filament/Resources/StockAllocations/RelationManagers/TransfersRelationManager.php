@@ -40,24 +40,26 @@ class TransfersRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('product_name')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['fromLine', 'toLine']))
+            // Judul sudah ada di tab, jadi tidak diulang di atas tabel
+            ->heading(null)
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['fromLine', 'toLine', 'mutation']))
             ->defaultSort('qty', 'desc')
             ->paginated([25, 50, 100])
             ->columns([
+                // Teks seperlunya: kode SKU & region muncul saat kursor diarahkan ke nama produk
                 TextColumn::make('product_name')
                     ->label('Produk')
-                    ->description(fn (StockAllocationTransfer $record): string => $record->sku.' · '.$record->region)
+                    ->tooltip(fn (StockAllocationTransfer $record): string => $record->sku.' · '.$record->region)
                     ->searchable(['product_name', 'sku'])
                     ->wrap(),
                 TextColumn::make('from_warehouse')
                     ->label('Dari')
                     ->weight('bold')
-                    ->description(fn (StockAllocationTransfer $record): string => $this->dosChange($record->fromLine)),
+                    ->description(fn (StockAllocationTransfer $record): string => $this->lineChange($record->fromLine)),
                 TextColumn::make('to_warehouse')
                     ->label('Ke')
                     ->weight('bold')
-                    ->description(fn (StockAllocationTransfer $record): string => $this->dosChange($record->toLine)
-                        .' · laku '.number_format((float) $record->toLine?->avg_daily_sales, 1, ',', '.').'/hr'),
+                    ->description(fn (StockAllocationTransfer $record): string => $this->lineChange($record->toLine)),
                 TextColumn::make('qty')
                     ->label('Qty')
                     ->numeric(locale: 'id')
@@ -67,11 +69,16 @@ class TransfersRelationManager extends RelationManager
                         ? 'saran '.$record->suggested_qty
                         : null)
                     ->sortable(),
+                // Saran yang belum diputuskan cukup teks abu-abu; badge hanya untuk yang sudah disetujui/ditolak
                 TextColumn::make('status')
                     ->label('Status')
-                    ->badge()
+                    ->badge(fn (string $state): bool => $state !== StockAllocationTransfer::STATUS_PENDING)
                     ->formatStateUsing(fn (string $state): string => StockAllocationTransfer::STATUS_LABELS[$state] ?? $state)
-                    ->color(fn (string $state): string => StockAllocationTransfer::STATUS_COLORS[$state] ?? 'gray'),
+                    ->color(fn (string $state): string => StockAllocationTransfer::STATUS_COLORS[$state] ?? 'gray')
+                    // Sudah masuk dokumen mutasi: nomor & statusnya, mis. "MUT-2610-001 · Dikirim"
+                    ->description(fn (StockAllocationTransfer $record): ?string => $record->mutation
+                        ? $record->mutation->number.' · '.$record->mutation->statusLabel()
+                        : null),
             ])
             ->filters([
                 SelectFilter::make('status')
@@ -92,12 +99,12 @@ class TransfersRelationManager extends RelationManager
                     Action::make('approve')
                         ->label('Setujui')
                         ->icon('heroicon-o-check')
-                        ->visible(fn (StockAllocationTransfer $record): bool => $record->status !== StockAllocationTransfer::STATUS_APPROVED && $this->canDecide())
+                        ->visible(fn (StockAllocationTransfer $record): bool => $record->status !== StockAllocationTransfer::STATUS_APPROVED && $this->canDecide($record))
                         ->action(fn (StockAllocationTransfer $record) => $this->decide([$record], StockAllocationTransfer::STATUS_APPROVED)),
                     Action::make('changeQty')
                         ->label('Ubah Qty')
                         ->icon('heroicon-o-pencil-square')
-                        ->visible(fn (): bool => $this->canDecide())
+                        ->visible(fn (StockAllocationTransfer $record): bool => $this->canDecide($record))
                         ->modalHeading(fn (StockAllocationTransfer $record): string => $record->from_warehouse.' → '.$record->to_warehouse)
                         ->modalDescription(fn (StockAllocationTransfer $record): string => $record->product_name)
                         ->modalWidth('sm')
@@ -121,12 +128,12 @@ class TransfersRelationManager extends RelationManager
                     Action::make('reject')
                         ->label('Tolak')
                         ->icon('heroicon-o-x-mark')
-                        ->visible(fn (StockAllocationTransfer $record): bool => $record->status !== StockAllocationTransfer::STATUS_REJECTED && $this->canDecide())
+                        ->visible(fn (StockAllocationTransfer $record): bool => $record->status !== StockAllocationTransfer::STATUS_REJECTED && $this->canDecide($record))
                         ->action(fn (StockAllocationTransfer $record) => $this->decide([$record], StockAllocationTransfer::STATUS_REJECTED)),
                     Action::make('reset')
-                        ->label('Kembalikan ke Menunggu')
+                        ->label('Batalkan Keputusan')
                         ->icon('heroicon-o-arrow-uturn-left')
-                        ->visible(fn (StockAllocationTransfer $record): bool => $record->status !== StockAllocationTransfer::STATUS_PENDING && $this->canDecide())
+                        ->visible(fn (StockAllocationTransfer $record): bool => $record->status !== StockAllocationTransfer::STATUS_PENDING && $this->canDecide($record))
                         ->action(fn (StockAllocationTransfer $record) => $this->decide([$record], StockAllocationTransfer::STATUS_PENDING)),
                 ])
                     ->label('Aksi')
@@ -158,18 +165,23 @@ class TransfersRelationManager extends RelationManager
         $this->dispatch('stock-allocation-updated');
     }
 
-    private function canDecide(): bool
+    private function canDecide(?StockAllocationTransfer $record = null): bool
     {
-        return auth()->user()?->can('update', $this->ownerRecord) ?? false;
+        return ! $record?->isLocked() && (auth()->user()?->can('update', $this->ownerRecord) ?? false);
     }
 
-    private function dosChange(?StockAllocationLine $line): string
+    private function lineChange(?StockAllocationLine $line): string
     {
-        if ($line?->dos_before === null) {
-            return 'tidak ada penjualan';
+        if ($line === null) {
+            return '–';
         }
 
-        return 'DOS '.StockAllocationResource::days($line->dos_before).' → '.StockAllocationResource::days($line->dos_after).' hr';
+        // Stok sesudah = stok + semua transfer masuk − keluar untuk produk ini di gudang tsb
+        $stock = 'stok '.number_format($line->stock, 0, ',', '.').' → '.number_format($line->stockAfter(), 0, ',', '.');
+
+        return $stock.' · '.($line->dos_before === null
+            ? 'tidak laku'
+            : 'DOS '.StockAllocationResource::days($line->dos_before).' → '.StockAllocationResource::days($line->dos_after));
     }
 
     /**

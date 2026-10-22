@@ -143,6 +143,42 @@ class FreightInvoiceItem extends Model
         return round(max(0, (float) $this->billed_total - $this->approvedAmount()), 2);
     }
 
+    /**
+     * Alasan singkat kenapa resi tidak dibayar penuh (tampil di bawah kolom Selisih). Resi yang sesuai: null.
+     */
+    public function reason(): ?string
+    {
+        if ($this->isManuallyApproved()) {
+            return 'Disetujui manual'.(filled($this->manual_note) ? ': '.str($this->manual_note)->limit(40) : '');
+        }
+
+        $agreed = (float) $this->agreed_rate;
+        $rate = (float) $this->billed_rate > 0 ? min((float) $this->billed_rate, $agreed) : $agreed;
+        // Berat yang dipakai hitungan sistem: (nominal sesuai kontrak − asuransi) ÷ tarif
+        $weight = $rate > 0 ? ((float) $this->expected_total - (float) $this->billed_insurance) / $rate : 0.0;
+
+        return match ($this->audit_status) {
+            'revisi_darat' => 'Harusnya DARAT: '.self::kg($weight).' kg × Rp '.self::rupiah($agreed),
+            'discrepancy_rate' => 'Tarif lebih mahal Rp '.self::rupiah((float) $this->billed_rate - $agreed).'/kg dari kontrak',
+            'discrepancy_weight' => 'Berat harusnya '.self::kg($weight).' kg',
+            'discrepancy_both' => 'Harusnya '.self::kg($weight).' kg × Rp '.self::rupiah($agreed),
+            'missing_rate', 'unrecognized' => 'Belum terverifikasi: tarif rute belum ada',
+            'missing_weight' => 'Berat belum diisi',
+            'duplicate' => 'Resi sudah pernah ditagih',
+            default => null,
+        };
+    }
+
+    private static function kg(float $value): string
+    {
+        return rtrim(rtrim(number_format($value, 2, ',', '.'), '0'), ',');
+    }
+
+    private static function rupiah(float $value): string
+    {
+        return number_format($value, 0, ',', '.');
+    }
+
     public function checkLabel(): string
     {
         return $this->isManuallyApproved() ? 'DISETUJUI MANUAL' : (self::STATUS_LABELS[$this->audit_status] ?? $this->audit_status);

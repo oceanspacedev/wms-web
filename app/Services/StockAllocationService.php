@@ -245,6 +245,11 @@ class StockAllocationService
     {
         DB::transaction(function () use ($allocation, $transfers, $status, $userId): void {
             foreach ($transfers as $transfer) {
+                // Yang sudah masuk dokumen mutasi tidak berubah lagi
+                if ($transfer->isLocked()) {
+                    continue;
+                }
+
                 $transfer->update([
                     'status' => $status,
                     'decided_by' => $status === StockAllocationTransfer::STATUS_PENDING ? null : $userId,
@@ -258,6 +263,10 @@ class StockAllocationService
 
     public function changeQty(StockAllocationTransfer $transfer, int $qty, ?int $userId): void
     {
+        if ($transfer->isLocked()) {
+            throw new RuntimeException('Saran ini sudah masuk dokumen mutasi.');
+        }
+
         DB::transaction(function () use ($transfer, $qty, $userId): void {
             $transfer->update([
                 'qty' => $qty,
