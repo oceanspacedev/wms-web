@@ -23,7 +23,7 @@ class CsaImportForm
                     ])
                     ->required()
                     ->maxSize(102400)
-                    ->helperText('File disimpan dulu, lalu diekstrak di belakang layar ke menu Data Pengiriman. Status di tabel diperbarui otomatis.'),
+                    ->helperText('Laporan penjualan CSA atau laporan realisasi TO. File diproses di belakang layar ke menu Data Pengiriman.'),
             ]);
     }
 }

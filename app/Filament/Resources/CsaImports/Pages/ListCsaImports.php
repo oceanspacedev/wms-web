@@ -20,7 +20,7 @@ class ListCsaImports extends ListRecords
         return [
             CreateAction::make()
                 ->label('Upload Laporan')
-                ->modalHeading('Upload Laporan CSA')
+                ->modalHeading('Upload Laporan')
                 ->modalSubmitActionLabel('Upload')
                 ->modalWidth(Width::Medium)
                 ->createAnother(false)

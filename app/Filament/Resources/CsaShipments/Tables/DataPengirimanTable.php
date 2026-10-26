@@ -95,10 +95,22 @@ class DataPengirimanTable
                     ->options(fn (): array => CsaShipment::query()->whereNotNull('brand')->where('brand', '!=', '')->distinct()->orderBy('brand')->pluck('brand', 'brand')->all())
                     ->searchable(),
 
+                SelectFilter::make('jenis')
+                    ->label('Jenis')
+                    ->options([
+                        'sj' => 'SJ',
+                        'to' => 'Realisasi TO',
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'sj' => $query->transferOrders(false),
+                        'to' => $query->transferOrders(),
+                        default => $query,
+                    }),
+
                 SelectFilter::make('csa_import_id')
-                    ->label('Upload CSA')
+                    ->label('Upload Laporan')
                     ->options(fn (): array => CsaImport::query()->latest('id')->limit(30)->get()
-                        ->mapWithKeys(fn (CsaImport $import): array => [$import->id => '#'.$import->id.' · '.$import->created_at?->format('d/m/Y H:i').' · '.$import->file_name])
+                        ->mapWithKeys(fn (CsaImport $import): array => [$import->id => '#'.$import->id.' · '.$import->created_at?->format('d/m/Y H:i').' · '.$import->reportLabel()])
                         ->all()),
 
                 SelectFilter::make('source')
@@ -122,9 +134,9 @@ class DataPengirimanTable
                     ->modalHeading(fn (CsaShipment $record): string => 'Data Pengiriman SJ '.$record->no_sj)
                     ->modalWidth('5xl')
                     ->mutateDataUsing(fn (array $data, CsaShipment $record): array => DataPengirimanForm::protectCsaFields($data, $record)),
-                // Baris CSA akan muncul lagi di upload berikutnya, jadi hanya input manual & hasil import yang bisa dihapus
+                // Baris CSA/TO akan muncul lagi di upload berikutnya, jadi hanya input manual & hasil import yang bisa dihapus
                 DeleteAction::make()
-                    ->visible(fn (CsaShipment $record): bool => $record->source !== CsaShipment::SOURCE_CSA),
+                    ->visible(fn (CsaShipment $record): bool => ! $record->isFromReport()),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
@@ -187,6 +199,7 @@ class DataPengirimanTable
                 ->sortable()
                 ->copyable()
                 ->weight('bold')
+                ->description(fn (CsaShipment $record): string => $record->isTransferOrder() ? 'Realisasi TO' : 'SJ')
                 // Merah = baru masuk di upload CSA terakhir (pengganti warna biru di spreadsheet)
                 ->color(fn (CsaShipment $record): ?string => static::isNewest($record) ? 'danger' : null)
                 ->tooltip(fn (CsaShipment $record): ?string => static::isNewest($record) ? 'Data baru dari upload CSA terakhir' : null),

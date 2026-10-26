@@ -24,7 +24,9 @@ class CsaImportsTable
                     ->label('Nama File')
                     ->searchable()
                     ->sortable()
-                    ->weight('bold'),
+                    ->weight('bold')
+                    // Jenis laporan baru diketahui setelah file diekstrak
+                    ->description(fn (CsaImport $record): ?string => $record->report_type === CsaImport::REPORT_TRANSFER ? $record->reportLabel() : null),
 
                 TextColumn::make('user.name')
                     ->label('Pengunggah')

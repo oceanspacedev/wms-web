@@ -2,17 +2,22 @@
 
 namespace App\Services;
 
+use App\Models\CsaImport;
 use App\Models\WarehouseMapping;
 use Exception;
 
 class CsaExcelParserService
 {
-    public function __construct(private XlsxReader $reader) {}
+    public function __construct(
+        private XlsxReader $reader,
+        private TransferOrderReportParser $transferOrders,
+    ) {}
 
     /**
-     * Parse a CSA sales report or a depot shipment workbook into shipments.
+     * Parse a CSA sales report, a transfer order (TO) report or a depot shipment workbook into shipments.
      *
      * @return array{
+     *     report_type: string,
      *     total_raw_rows: int,
      *     total_shipments: int,
      *     by_sheet: array<string, array{total_sj: int, total_qty: int, total_nominal: float}>,
@@ -29,6 +34,7 @@ class CsaExcelParserService
         $sheets = $this->reader->sheets($filePath);
 
         $salesSheet = null;
+        $transferSheet = null;
         $depotSheets = [];
 
         foreach ($sheets as $sheetName => $sheetPath) {
@@ -38,20 +44,28 @@ class CsaExcelParserService
                 $salesSheet = $sheetPath;
             }
 
+            if ($kind === 'transfer' && $transferSheet === null) {
+                $transferSheet = $sheetPath;
+            }
+
             if ($kind === 'depot') {
                 $depotSheets[$sheetName] = $sheetPath;
             }
         }
 
         if ($salesSheet !== null) {
-            return $this->parseSalesSheet($filePath, $salesSheet, $sharedStrings);
+            return ['report_type' => CsaImport::REPORT_SALES] + $this->parseSalesSheet($filePath, $salesSheet, $sharedStrings);
+        }
+
+        if ($transferSheet !== null) {
+            return ['report_type' => CsaImport::REPORT_TRANSFER] + $this->transferOrders->parse($filePath, $transferSheet, $sharedStrings);
         }
 
         if ($depotSheets !== []) {
-            return $this->parseDepotSheets($filePath, $depotSheets, $sharedStrings);
+            return ['report_type' => CsaImport::REPORT_SALES] + $this->parseDepotSheets($filePath, $depotSheets, $sharedStrings);
         }
 
-        throw new Exception('Format Excel tidak dikenali sebagai laporan penjualan CSA atau laporan pengiriman depo');
+        throw new Exception('Format Excel tidak dikenali sebagai laporan penjualan CSA, laporan realisasi TO, atau laporan pengiriman depo');
     }
 
     /**
@@ -64,6 +78,10 @@ class CsaExcelParserService
         foreach ($this->reader->iterateRows($filePath, $sheetPath, $sharedStrings) as $cells) {
             $seen++;
             $text = strtolower(implode(' ', $cells));
+
+            if ($this->transferOrders->isTitleRow($cells)) {
+                return 'transfer';
+            }
 
             if (str_contains($text, 'nama barang') && str_contains($text, 'nomor sj')) {
                 return 'sales';

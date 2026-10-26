@@ -25,11 +25,11 @@ class DataPengirimanForm
             ->columns(1)
             ->components([
                 Section::make('Data Surat Jalan')
-                    ->description(fn (?CsaShipment $record): string => static::isFromCsa($record)
-                        ? 'Dari laporan CSA. Diperbarui otomatis setiap upload, tidak bisa diubah di sini.'
+                    ->description(fn (?CsaShipment $record): string => static::isFromReport($record)
+                        ? 'Dari laporan '.($record->source === CsaShipment::SOURCE_TO ? 'realisasi TO' : 'CSA').'. Diperbarui otomatis setiap upload, tidak bisa diubah di sini.'
                         : 'Untuk pengiriman di luar laporan CSA (retur, transfer internal, dll.).')
                     ->columns(3)
-                    ->disabled(fn (?CsaShipment $record): bool => static::isFromCsa($record))
+                    ->disabled(fn (?CsaShipment $record): bool => static::isFromReport($record))
                     ->schema([
                         DatePicker::make('tanggal_order')
                             ->label('Tanggal Order'),
@@ -123,9 +123,9 @@ class DataPengirimanForm
             ]);
     }
 
-    public static function isFromCsa(?CsaShipment $record): bool
+    public static function isFromReport(?CsaShipment $record): bool
     {
-        return $record?->source === CsaShipment::SOURCE_CSA;
+        return $record?->isFromReport() ?? false;
     }
 
     /**
@@ -136,7 +136,7 @@ class DataPengirimanForm
      */
     public static function protectCsaFields(array $data, CsaShipment $record): array
     {
-        if (! static::isFromCsa($record)) {
+        if (! static::isFromReport($record)) {
             return $data;
         }
 

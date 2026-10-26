@@ -21,14 +21,24 @@ class CsaShipment extends Model
     /** Baris hasil import file spreadsheet "Update Pengiriman" (data lama dari Google Sheet). */
     public const SOURCE_SPREADSHEET = 'spreadsheet';
 
+    /** Baris dari upload laporan realisasi TO (transfer gudang pusat ke depo). */
+    public const SOURCE_TO = 'to';
+
     /**
      * @var array<string, string>
      */
     public const SOURCE_LABELS = [
         self::SOURCE_CSA => 'Upload CSA',
+        self::SOURCE_TO => 'Upload TO',
         self::SOURCE_SPREADSHEET => 'Import spreadsheet',
         self::SOURCE_MANUAL => 'Input manual',
     ];
+
+    /**
+     * Nomor TO selalu nomor transaksi 10 digit + kaki ISSUE/RECEIVE (2610000224-01), termasuk TO lama
+     * yang dicatat di spreadsheet; nomor SJ penjualan tanpa akhiran.
+     */
+    public const TO_NUMBER_LIKE = '__________-__';
 
     /**
      * Kolom yang selalu mengikuti laporan CSA terbaru saat SJ yang sama di-upload ulang.
@@ -41,13 +51,13 @@ class CsaShipment extends Model
     ];
 
     /**
-     * Kolom isian admin yang juga bisa datang dari laporan CSA: hanya diisi dari upload kalau masih kosong.
+     * Kolom isian admin yang juga bisa datang dari laporan CSA/TO: hanya diisi dari upload kalau masih kosong.
      *
      * @var list<string>
      */
     public const FILL_IF_EMPTY_FIELDS = [
         'qty_koli', 'berat', 'ketentuan_biaya_kirim', 'nama_ekspedisi', 'no_resi_awb', 'biaya_kirim',
-        'status_pembayaran', 'status_pengiriman',
+        'status_pembayaran', 'status_pengiriman', 'tanggal_diterima',
     ];
 
     /**
@@ -128,6 +138,35 @@ class CsaShipment extends Model
         $cabang = $user?->cabangScope();
 
         return $cabang ? $query->where('target_sheet', $cabang) : $query;
+    }
+
+    /**
+     * @param  Builder<CsaShipment>  $query
+     * @return Builder<CsaShipment>
+     */
+    public function scopeTransferOrders(Builder $query, bool $isTransferOrder = true): Builder
+    {
+        // coalesce: baris tanpa No SJ tetap terhitung sebagai SJ saat kondisinya dibalik
+        $condition = fn (Builder $q): Builder => $q
+            ->whereRaw("coalesce(source, '') = ?", [self::SOURCE_TO])
+            ->orWhereRaw("coalesce(no_sj, '') like ?", [self::TO_NUMBER_LIKE]);
+
+        return $isTransferOrder
+            ? $query->where($condition)
+            : $query->whereNot($condition);
+    }
+
+    public function isTransferOrder(): bool
+    {
+        return $this->source === self::SOURCE_TO || preg_match('/^.{10}-.{2}$/', (string) $this->no_sj) === 1;
+    }
+
+    /**
+     * Baris dari upload laporan (CSA atau TO): datanya mengikuti laporan dan akan muncul lagi di upload berikutnya.
+     */
+    public function isFromReport(): bool
+    {
+        return in_array($this->source, [self::SOURCE_CSA, self::SOURCE_TO], true);
     }
 
     /**

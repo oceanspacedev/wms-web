@@ -54,14 +54,18 @@ class ProcessCsaImportJob implements ShouldQueue
             }
 
             $result = $parser->parseAndAggregate($filePath);
+            $reportType = $result['report_type'] ?? CsaImport::REPORT_SALES;
 
             $this->csaImport->update([
+                'report_type' => $reportType,
                 'total_raw_rows' => $result['total_raw_rows'],
                 'total_shipments' => $result['total_shipments'],
                 'summary_by_sheet' => $result['by_sheet'],
             ]);
 
-            [$totalNew, $totalUpdated, $totalSkipped] = $this->saveShipments($result['shipments']);
+            [$totalNew, $totalUpdated, $totalSkipped] = $reportType === CsaImport::REPORT_TRANSFER
+                ? $this->saveTransferOrders($result['shipments'])
+                : $this->saveShipments($result['shipments']);
 
             $this->csaImport->update([
                 'status' => 'completed',
@@ -144,38 +148,7 @@ class ProcessCsaImportJob implements ShouldQueue
                 }
 
                 $totalNew++;
-                $records[] = [
-                    'csa_import_id' => $this->csaImport->id,
-                    'source' => CsaShipment::SOURCE_CSA,
-                    'no_sj' => $item['no_sj'],
-                    'no_trans' => $item['no_trans'],
-                    'no_so' => $item['no_so'],
-                    'tanggal_order' => $item['tanggal_order'],
-                    'tanggal_kirim' => $item['tanggal_kirim'],
-                    'badan_usaha' => $item['badan_usaha'],
-                    'kode_gudang' => $item['kode_gudang'],
-                    'nama_gudang' => $item['nama_gudang'],
-                    'target_sheet' => $item['target_sheet'],
-                    'tujuan_dealer' => $item['tujuan_dealer'],
-                    'alamat_kirim' => $item['alamat_kirim'],
-                    'nama_kota' => $item['nama_kota'],
-                    'brand' => $item['brand'],
-                    'reff_note' => $item['reff_note'],
-                    'total_nominal_sj' => $item['total_nominal_sj'],
-                    'qty_unit' => $item['qty_unit'],
-                    'qty_koli' => $item['qty_koli'],
-                    'berat' => $item['berat'],
-                    'ketentuan_biaya_kirim' => $item['ketentuan_biaya_kirim'],
-                    'nama_ekspedisi' => $item['nama_ekspedisi'],
-                    'no_resi_awb' => $item['no_resi_awb'],
-                    'biaya_kirim' => $item['biaya_kirim'],
-                    'status_pembayaran' => $item['status_pembayaran'],
-                    'status_pengiriman' => $item['status_pengiriman'],
-                    'ket_isi_unit' => $item['ket_isi_unit'],
-                    'is_synced' => false,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
+                $records[] = $this->newRecord($item, CsaShipment::SOURCE_CSA, $now);
             }
 
             if ($records !== []) {
@@ -184,6 +157,108 @@ class ProcessCsaImportJob implements ShouldQueue
         }
 
         return [$totalNew, $totalUpdated, $totalSkipped];
+    }
+
+    /**
+     * Simpan TO dari laporan realisasi TO. Nomor ISSUE unik, jadi TO yang sudah ada di Data Pengiriman (hasil import
+     * spreadsheet, input manual, atau upload TO sebelumnya) tidak ditambah lagi. TO dari upload sebelumnya diperbarui
+     * seperti SJ CSA; di baris lain hanya tanggal diterima yang diisi dari laporan, itu pun kalau masih kosong.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array{0: int, 1: int, 2: int} [TO baru, TO yang diperbarui, TO yang sudah ada]
+     */
+    protected function saveTransferOrders(array $items): array
+    {
+        $totalNew = 0;
+        $totalUpdated = 0;
+        $totalSkipped = 0;
+
+        foreach (array_chunk($items, 500) as $chunk) {
+            $existing = CsaShipment::query()
+                ->whereIn('no_sj', array_column($chunk, 'no_sj'))
+                ->get()
+                ->groupBy('no_sj');
+
+            $records = [];
+            $now = now();
+
+            foreach ($chunk as $item) {
+                $rows = $existing->get($item['no_sj']);
+
+                if ($rows === null) {
+                    $totalNew++;
+                    $records[] = $this->newRecord($item, CsaShipment::SOURCE_TO, $now);
+
+                    continue;
+                }
+
+                $ownRow = $rows->firstWhere('source', CsaShipment::SOURCE_TO);
+
+                if ($ownRow) {
+                    $this->refreshFromCsa($ownRow, $item);
+                    $totalUpdated++;
+
+                    continue;
+                }
+
+                $receivedFilled = $item['tanggal_diterima'] !== null
+                    ? $rows->whereNull('tanggal_diterima')
+                        ->each(function (CsaShipment $shipment) use ($item): void {
+                            $shipment->update(['tanggal_diterima' => $item['tanggal_diterima']]);
+                        })
+                        ->count()
+                    : 0;
+
+                $receivedFilled > 0 ? $totalUpdated++ : $totalSkipped++;
+            }
+
+            if ($records !== []) {
+                DB::table('csa_shipments')->insert($records);
+            }
+        }
+
+        return [$totalNew, $totalUpdated, $totalSkipped];
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     * @return array<string, mixed>
+     */
+    protected function newRecord(array $item, string $source, mixed $now): array
+    {
+        return [
+            'csa_import_id' => $this->csaImport->id,
+            'source' => $source,
+            'no_sj' => $item['no_sj'],
+            'no_trans' => $item['no_trans'],
+            'no_so' => $item['no_so'],
+            'tanggal_order' => $item['tanggal_order'],
+            'tanggal_kirim' => $item['tanggal_kirim'],
+            'tanggal_diterima' => $item['tanggal_diterima'] ?? null,
+            'badan_usaha' => $item['badan_usaha'],
+            'kode_gudang' => $item['kode_gudang'],
+            'nama_gudang' => $item['nama_gudang'],
+            'target_sheet' => $item['target_sheet'],
+            'tujuan_dealer' => $item['tujuan_dealer'],
+            'alamat_kirim' => $item['alamat_kirim'],
+            'nama_kota' => $item['nama_kota'],
+            'brand' => $item['brand'],
+            'reff_note' => $item['reff_note'],
+            'total_nominal_sj' => $item['total_nominal_sj'],
+            'qty_unit' => $item['qty_unit'],
+            'qty_koli' => $item['qty_koli'],
+            'berat' => $item['berat'],
+            'ketentuan_biaya_kirim' => $item['ketentuan_biaya_kirim'],
+            'nama_ekspedisi' => $item['nama_ekspedisi'],
+            'no_resi_awb' => $item['no_resi_awb'],
+            'biaya_kirim' => $item['biaya_kirim'],
+            'status_pembayaran' => $item['status_pembayaran'],
+            'status_pengiriman' => $item['status_pengiriman'],
+            'ket_isi_unit' => $item['ket_isi_unit'],
+            'is_synced' => false,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
     }
 
     protected function spreadsheetKey(?string $cabang, ?string $noSj): string
