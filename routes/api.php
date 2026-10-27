@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\HomeApiController;
 use App\Http\Controllers\Api\V1\PurchaseOrderApiController;
 use App\Http\Controllers\Api\V1\TrackingOrderApiController;
 use App\Http\Controllers\Api\V1\UserProfileApiController;
@@ -27,6 +28,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/user/whatsapp/verify-otp', [UserProfileApiController::class, 'verifyWhatsAppOtp']);
     Route::delete('/me', [UserProfileApiController::class, 'destroy'])->name('profile.destroy');
     Route::delete('/user', [UserProfileApiController::class, 'destroy']);
+
+    Route::get('/home/today', [HomeApiController::class, 'today'])->name('home.today');
 
     Route::get('/courier/drivers', [TrackingOrderApiController::class, 'drivers'])->name('courier.drivers');
     Route::get('/courier/summary', [TrackingOrderApiController::class, 'courierSummary'])->name('courier.summary');

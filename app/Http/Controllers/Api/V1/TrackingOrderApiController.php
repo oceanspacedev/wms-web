@@ -180,26 +180,11 @@ class TrackingOrderApiController extends Controller
             }
         } elseif (! $request->filled('kurir') && ! $request->filled('nama_pengirim')) {
             // Tanpa query dari Profile: hitung SJ milik kurir hari ini
-            $today = now()->toDateString();
-            $query->where(function ($q) use ($today): void {
-                $q->whereDate('tanggal_pengiriman', $today)
-                    ->orWhere(function ($sub) use ($today): void {
-                        $sub->whereNull('tanggal_pengiriman')
-                            ->whereDate('created_at', $today);
-                    });
-            });
+            $query->onDay(now()->toDateString());
         }
 
         $totalAssigned = (clone $query)->count();
-
-        // SJ dianggap terkirim begitu ada foto atau nama penerima
-        $totalDelivered = (clone $query)->where(function ($q): void {
-            $q->where(function ($sub): void {
-                $sub->whereNotNull('foto_penerima')->where('foto_penerima', '!=', '');
-            })->orWhere(function ($sub): void {
-                $sub->whereNotNull('nama_penerima')->where('nama_penerima', '!=', '');
-            });
-        })->count();
+        $totalDelivered = (clone $query)->delivered()->count();
 
         $totalPending = max(0, $totalAssigned - $totalDelivered);
 

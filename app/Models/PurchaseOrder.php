@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Models\Concerns\HasOwner;
 use Database\Factories\PurchaseOrderFactory;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -74,5 +76,22 @@ class PurchaseOrder extends Model
             'latitude' => 'float',
             'longitude' => 'float',
         ];
+    }
+
+    /**
+     * Barang yang datang pada tanggal tersebut; tanpa tanggal datang ikut tanggal dicatat.
+     *
+     * @param  Builder<static>  $query
+     */
+    #[Scope]
+    protected function onDay(Builder $query, string $date): void
+    {
+        $query->where(function (Builder $q) use ($date): void {
+            $q->whereDate('tanggal_datang', $date)
+                ->orWhere(function (Builder $sub) use ($date): void {
+                    $sub->whereNull('tanggal_datang')
+                        ->whereDate('created_at', $date);
+                });
+        });
     }
 }
