@@ -195,22 +195,27 @@ class TrackingOrderApiTest extends TestCase
             ->assertJsonValidationErrors(['latitude', 'longitude']);
     }
 
-    public function test_user_cannot_create_tracking_order_with_duplicate_no_sj(): void
+    public function test_same_no_sj_from_another_business_entity_is_accepted(): void
     {
+        Storage::fake();
         $this->actAsCourier();
 
         TrackingOrder::create([
-            'no_sj' => 'SJ-EXISTING-123',
+            'no_sj' => '2610000584',
             'nama_dealer' => 'Dealer Lama',
         ]);
 
-        $response = $this->postJson('/api/tracking-orders', [
-            'no_sj' => 'SJ-EXISTING-123',
+        $this->post('/api/tracking-orders', [
+            'no_sj' => '2610000584',
             'nama_dealer' => 'Dealer Baru',
-        ]);
+            'nama_penerima' => 'Pak Joko',
+            'foto_nota_sj' => UploadedFile::fake()->image('nota.jpg'),
+            'foto_penerima' => UploadedFile::fake()->image('penerima.jpg'),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.nama_dealer', 'Dealer Baru');
 
-        $response->assertStatus(422)
-            ->assertJsonValidationErrors(['no_sj']);
+        $this->assertSame(2, TrackingOrder::where('no_sj', '2610000584')->count());
     }
 
     public function test_user_cannot_create_tracking_order_without_required_fields(): void

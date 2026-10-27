@@ -23,7 +23,8 @@ class CreateTrackingOrderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'no_sj' => ['required', 'string', 'max:100', 'unique:tracking_orders,no_sj'],
+            // Tiap badan usaha punya urutan nomor sendiri, jadi nomor SJ yang sama bisa sah ke dealer lain.
+            'no_sj' => ['required', 'string', 'max:100'],
             'nama_dealer' => ['required', 'string', 'max:255'],
             'alamat_dealer' => ['nullable', 'string', 'max:1000'],
             'jumlah_value_nota' => ['nullable', 'numeric', 'min:0'],
@@ -49,7 +50,6 @@ class CreateTrackingOrderRequest extends FormRequest
     {
         return [
             'no_sj.required' => 'Nomor Surat Jalan wajib diisi.',
-            'no_sj.unique' => 'Nomor Surat Jalan sudah terdaftar di sistem.',
             'nama_dealer.required' => 'Nama dealer / toko tujuan wajib diisi.',
             'nama_penerima.required' => 'Nama penerima wajib diisi.',
             'foto_nota_sj.required' => 'Foto nota surat jalan wajib diunggah.',
