@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\CsaImport;
 use App\Models\WarehouseMapping;
+use App\Support\ItemName;
+use DateTimeImmutable;
 use Exception;
 
 class CsaExcelParserService
@@ -21,7 +23,9 @@ class CsaExcelParserService
      *     total_raw_rows: int,
      *     total_shipments: int,
      *     by_sheet: array<string, array{total_sj: int, total_qty: int, total_nominal: float}>,
-     *     shipments: array<int, array<string, mixed>>
+     *     shipments: array<int, array<string, mixed>>,
+     *     items?: list<array<string, mixed>>,
+     *     period?: array{0: ?string, 1: ?string}
      * }
      */
     public function parseAndAggregate(string $filePath): array
@@ -110,7 +114,9 @@ class CsaExcelParserService
      *     total_raw_rows: int,
      *     total_shipments: int,
      *     by_sheet: array<string, array{total_sj: int, total_qty: int, total_nominal: float}>,
-     *     shipments: array<int, array<string, mixed>>
+     *     shipments: array<int, array<string, mixed>>,
+     *     items: list<array<string, mixed>>,
+     *     period: array{0: ?string, 1: ?string}
      * }
      */
     protected function parseSalesSheet(string $filePath, string $sheetPath, array $sharedStrings): array
@@ -122,8 +128,10 @@ class CsaExcelParserService
 
         $headerMap = [];
         $badanUsaha = 'PT. MEDIA SELULAR INDONESIA';
+        $period = [null, null];
         $rawRowCount = 0;
         $groupedShipments = [];
+        $items = [];
 
         foreach ($this->reader->iterateRows($filePath, $sheetPath, $sharedStrings) as $cells) {
             $rowNumber = (int) ($cells['_row'] ?? 0);
@@ -140,18 +148,31 @@ class CsaExcelParserService
                     $badanUsaha = $title;
                 }
 
+                // "Tanggal : 01/10/2026 sd 27/10/2026"
+                if (preg_match('/^Tanggal\s*:\s*(\d{2}\/\d{2}\/\d{4})\s*(?:sd|s\/d|-)\s*(\d{2}\/\d{2}\/\d{4})/i', $title, $match) === 1) {
+                    $period = [$this->dmyToDate($match[1]), $this->dmyToDate($match[2])];
+                }
+
                 continue;
             }
 
             $rawRowCount++;
             $this->accumulateSalesRow($cells, $headerMap, $groupedShipments, $warehouseMappings, $badanUsaha);
+            $this->accumulateSalesItem($cells, $headerMap, $items);
         }
 
         if ($headerMap === []) {
             throw new Exception('Header laporan penjualan CSA tidak ditemukan');
         }
 
-        return $this->finalize($groupedShipments, $rawRowCount);
+        return $this->finalize($groupedShipments, $rawRowCount) + ['items' => array_values($items), 'period' => $period];
+    }
+
+    protected function dmyToDate(string $value): ?string
+    {
+        $date = DateTimeImmutable::createFromFormat('!d/m/Y', $value);
+
+        return $date !== false ? $date->format('Y-m-d') : null;
     }
 
     /**
@@ -281,7 +302,9 @@ class CsaExcelParserService
             'customer' => $this->findColumn($labels, ['customer'], true),
             'resi' => $this->findColumn($labels, ['nomor resi', 'resi']),
             'reff_note' => $this->findColumn($labels, ['ref.note', 'ref note', 'reffnote']),
+            'kode_barang' => $this->findColumn($labels, ['kode barang']),
             'nama_barang' => $this->findColumn($labels, ['nama barang']),
+            'kategori' => $this->findColumn($labels, ['sort code']),
             'brand' => $this->findColumn($labels, ['family']) ?? $this->findColumn($labels, ['brand']),
             'qty' => $this->findColumn($labels, ['qty'], true),
             'nominal' => $this->findColumn($labels, ['jumlah'], true),
@@ -410,6 +433,47 @@ class CsaExcelParserService
             $summaryParts[] = "{$count}x {$item}";
         }
         $grouped[$key]['ket_isi_unit'] = implode(', ', array_slice($summaryParts, 0, 3));
+    }
+
+    /**
+     * Penjualan per gudang per barang (satu kode barang = satu model + warna) untuk tab Penjualan per Barang.
+     * Retur/refund ber-qty minus ikut mengurangi.
+     *
+     * @param  array<string, string>  $cells
+     * @param  array<string, string>  $map
+     * @param  array<string, array<string, mixed>>  $items
+     */
+    protected function accumulateSalesItem(array $cells, array $map, array &$items): void
+    {
+        $kodeBarang = $this->cell($cells, $map, 'kode_barang');
+        $namaBarang = $this->cell($cells, $map, 'nama_barang');
+
+        if ($kodeBarang === '' && $namaBarang === '') {
+            return;
+        }
+
+        $kodeGudang = $this->cell($cells, $map, 'kode_gudang');
+        $key = $kodeGudang.'|'.($kodeBarang !== '' ? $kodeBarang : $namaBarang);
+
+        if (! isset($items[$key])) {
+            [$model, $warna, $isUnit] = ItemName::describe($namaBarang, $this->cell($cells, $map, 'kategori'));
+
+            $items[$key] = [
+                'kode_gudang' => $kodeGudang !== '' ? $kodeGudang : '-',
+                'nama_gudang' => $this->cell($cells, $map, 'nama_gudang') ?: null,
+                'kode_barang' => $kodeBarang !== '' ? $kodeBarang : '-',
+                'nama_barang' => $namaBarang !== '' ? $namaBarang : $kodeBarang,
+                'model' => $model !== '' ? $model : $kodeBarang,
+                'warna' => $warna,
+                'brand' => $this->cell($cells, $map, 'brand') ?: null,
+                'is_unit' => $isUnit,
+                'qty' => 0,
+                'nominal' => 0.0,
+            ];
+        }
+
+        $items[$key]['qty'] += (int) ($this->cell($cells, $map, 'qty') ?: 0);
+        $items[$key]['nominal'] += (float) ($this->cell($cells, $map, 'nominal') ?: 0);
     }
 
     /**

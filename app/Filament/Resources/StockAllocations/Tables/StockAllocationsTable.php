@@ -20,9 +20,11 @@ class StockAllocationsTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->withCount([
-                'transfers as approved_count' => fn (Builder $query): Builder => $query->where('status', StockAllocationTransfer::STATUS_APPROVED),
-            ]))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->withCount([
+                    'transfers as approved_count' => fn (Builder $query): Builder => $query->where('status', StockAllocationTransfer::STATUS_APPROVED),
+                ])
+                ->withExists('mutations'))
             ->columns([
                 TextColumn::make('name')
                     ->label('Data')
@@ -62,7 +64,9 @@ class StockAllocationsTable
                 ActionGroup::make([
                     ViewAction::make(),
                     ExportAllocationAction::make(),
-                    DeleteAction::make(),
+                    // Sudah ada dokumen mutasi: tidak bisa dihapus (lihat StockAllocation::booted)
+                    DeleteAction::make()
+                        ->hidden(fn (StockAllocation $record): bool => (bool) $record->mutations_exists),
                 ])
                     ->label('Aksi')
                     ->tooltip('Pilihan Aksi')
@@ -70,6 +74,7 @@ class StockAllocationsTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    // Yang sudah punya dokumen mutasi ditolak per data dan dilaporkan gagal
                     DeleteBulkAction::make(),
                 ]),
             ]);

@@ -2,19 +2,25 @@
 
 namespace App\Services;
 
+use App\Models\CsaImport;
 use App\Models\StockAllocation;
 use App\Models\StockAllocationLine;
 use App\Models\StockAllocationTransfer;
+use App\Models\WarehouseMapping;
+use App\Support\ItemName;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * Saran alokasi stok antar gudang dari data stok, penjualan & incoming per gudang × SKU (format tab "Data" file DOS).
+ * Saran alokasi stok antar gudang dari data stok, penjualan & incoming per gudang × SKU. Sumbernya file DOS
+ * (tab "Data") atau laporan stok ERP [XRSTOK02] + laporan penjualan yang sudah di-upload.
  *
- * Per SKU dalam satu region: gudang yang stoknya di bawah target DOS menerima dari gudang yang stoknya di atas
- * target (gudang pengirim tetap menyisakan stok sebesar target DOS). Gudang paling kritis dilayani lebih dulu,
- * diambil dari gudang yang paling berlebih. Kekurangan yang tidak tertutup transfer menjadi rekomendasi PO.
+ * Per SKU: gudang yang stoknya di bawah target DOS menerima dari gudang satu region yang stoknya di atas target,
+ * lalu dari gudang PUSAT. PUSAT terhubung ke semua region: mengirim ke depo mana pun dan menerima dari depo mana pun.
+ * Gudang pengirim tetap menyisakan stok fisik sebesar target DOS.
+ * Gudang paling kritis dilayani lebih dulu, diambil dari gudang yang paling berlebih. Kekurangan yang tidak
+ * tertutup transfer menjadi rekomendasi PO.
  */
 class StockAllocationService
 {
@@ -22,6 +28,16 @@ class StockAllocationService
      * Region yang tidak ikut dialokasikan: gudang retur dan gudang non-penjualan (aktiva, dll.).
      */
     public const EXCLUDED_REGIONS = ['RETUR', 'OTHER'];
+
+    /**
+     * Gudang pusat: mengirim ke dan menerima dari depo di region mana pun.
+     */
+    public const HUB_REGION = 'PUSAT';
+
+    /**
+     * Gudang transit di laporan stok ERP (#HPMBDG = barang dalam perjalanan ke GMBDG).
+     */
+    public const TRANSIT_PREFIX = '#HPM';
 
     /**
      * Header kolom yang dikenali (nama kolom di file → field).
@@ -42,20 +58,24 @@ class StockAllocationService
 
     private const REQUIRED = ['warehouse', 'description', 'qty', 'sku'];
 
-    public function __construct(private XlsxReader $reader) {}
+    public function __construct(
+        private XlsxReader $reader,
+        private StockReportReader $stockReport,
+    ) {}
 
     public function import(string $path, string $name, ?string $fileName, int $targetDos, int $minTransferQty, ?int $userId): StockAllocation
     {
-        $rows = $this->read($path);
+        $report = $this->stockReport->read($path);
+        [$rows, $sources] = $report !== null ? $this->fromStockReport($report) : [$this->read($path), []];
 
-        return DB::transaction(function () use ($rows, $name, $fileName, $targetDos, $minTransferQty, $userId): StockAllocation {
+        return DB::transaction(function () use ($rows, $sources, $name, $fileName, $targetDos, $minTransferQty, $userId): StockAllocation {
             $allocation = StockAllocation::create([
                 'name' => $name,
                 'file_name' => $fileName,
                 'target_dos' => $targetDos,
                 'min_transfer_qty' => $minTransferQty,
                 'created_by' => $userId,
-            ]);
+            ] + $sources);
 
             $now = now();
             foreach (array_chunk($rows, 500) as $chunk) {
@@ -137,7 +157,7 @@ class StockAllocationService
             $transfers = [];
             $now = now();
 
-            foreach ($lines->groupBy(fn (StockAllocationLine $line): string => $line->region.'|'.$line->sku) as $group) {
+            foreach ($lines->groupBy('sku') as $group) {
                 $surplus = [];
                 foreach ($group as $line) {
                     $qty = $this->surplus($line, $target);
@@ -159,8 +179,13 @@ class StockAllocationService
 
                 foreach ($receivers as $to) {
                     $remaining = $to->need_qty;
+                    // Pusat menerima dari depo mana pun; depo dari depo satu region dulu (lebih dekat), baru pusat
+                    $candidates = $this->isHub($to)
+                        ? $sources->reject(fn (StockAllocationLine $from): bool => $this->isHub($from))
+                        : $sources->filter(fn (StockAllocationLine $from): bool => $from->region === $to->region)
+                            ->concat($sources->filter(fn (StockAllocationLine $from): bool => $this->isHub($from)));
 
-                    foreach ($sources as $from) {
+                    foreach ($candidates as $from) {
                         $qty = min($remaining, $surplus[$from->id]);
                         if ($qty < $min) {
                             continue;
@@ -250,6 +275,11 @@ class StockAllocationService
                     continue;
                 }
 
+                // Saran yang ditolak dipakai lagi: stoknya mungkin sudah terpakai saran lain dari gudang yang sama
+                if ($transfer->status === StockAllocationTransfer::STATUS_REJECTED && $status !== StockAllocationTransfer::STATUS_REJECTED) {
+                    $this->ensureAvailable($transfer, $transfer->qty);
+                }
+
                 $transfer->update([
                     'status' => $status,
                     'decided_by' => $status === StockAllocationTransfer::STATUS_PENDING ? null : $userId,
@@ -268,6 +298,8 @@ class StockAllocationService
         }
 
         DB::transaction(function () use ($transfer, $qty, $userId): void {
+            $this->ensureAvailable($transfer, $qty);
+
             $transfer->update([
                 'qty' => $qty,
                 'status' => StockAllocationTransfer::STATUS_APPROVED,
@@ -277,6 +309,29 @@ class StockAllocationService
 
             $this->refreshTotals($transfer->allocation);
         });
+    }
+
+    /**
+     * Stok gudang pengirim untuk produk ini yang belum dipakai saran lain (yang tidak ditolak) dari gudang yang sama.
+     */
+    public function availableQty(StockAllocationTransfer $transfer): int
+    {
+        $usedByOthers = (int) StockAllocationTransfer::query()
+            ->where('from_line_id', $transfer->from_line_id)
+            ->whereKeyNot($transfer->getKey())
+            ->where('status', '!=', StockAllocationTransfer::STATUS_REJECTED)
+            ->sum('qty');
+
+        return max(0, (int) $transfer->fromLine->stock - $usedByOthers);
+    }
+
+    private function ensureAvailable(StockAllocationTransfer $transfer, int $qty): void
+    {
+        $available = $this->availableQty($transfer);
+
+        if ($qty > $available) {
+            throw new RuntimeException("Stok {$transfer->from_warehouse} untuk {$transfer->product_name} tinggal {$available} unit; sisanya sudah dipakai saran lain.");
+        }
     }
 
     /**
@@ -399,7 +454,8 @@ class StockAllocationService
     }
 
     /**
-     * Stok yang boleh dipindah: kelebihan di atas target DOS (incoming ikut dihitung), maksimal stok yang ada.
+     * Stok yang boleh dipindah: stok fisik di atas target DOS. Incoming tidak dihitung supaya gudang pengirim
+     * tidak kosong kalau barang yang sedang di jalan terlambat datang.
      */
     private function surplus(StockAllocationLine $line, int $target): int
     {
@@ -407,9 +463,107 @@ class StockAllocationService
             return 0;
         }
 
-        $gap = $line->stock + $line->incoming - $this->ideal($line, $target);
+        return max(0, (int) floor(round($line->stock - $this->ideal($line, $target), 6)));
+    }
 
-        return max(0, (int) floor(round(min($gap, $line->stock), 6)));
+    private function isHub(StockAllocationLine $line): bool
+    {
+        return $line->region === self::HUB_REGION;
+    }
+
+    /**
+     * Baris alokasi dari laporan stok ERP + laku dari laporan penjualan yang sudah di-upload (Laporan Penjualan CSA).
+     * Hanya HP & tablet di gudang yang punya region di Pemetaan Gudang; stok gudang transit #HPMxxx menjadi
+     * incoming depo GMxxx.
+     *
+     * @param  array{stock_date: ?string, rows: list<array<string, mixed>>}  $report
+     * @return array{0: list<array<string, mixed>>, 1: array<string, mixed>} [baris, sumber data alokasi]
+     */
+    private function fromStockReport(array $report): array
+    {
+        $regions = WarehouseMapping::query()
+            ->where('is_active', true)
+            ->whereNotNull('region')
+            ->where('region', '!=', '')
+            ->pluck('region', 'csa_code')
+            ->mapWithKeys(fn (string $region, string $code): array => [strtoupper(trim($code)) => strtoupper(trim($region))]);
+
+        if ($regions->isEmpty()) {
+            throw new RuntimeException('Belum ada gudang yang punya region. Isi kolom Region di menu Pemetaan Gudang.');
+        }
+
+        $sales = $this->salesImportFor($report['stock_date']);
+
+        if ($sales === null) {
+            throw new RuntimeException('Belum ada laporan penjualan untuk menghitung laku. Upload dulu di Laporan Penjualan CSA.');
+        }
+
+        $days = $sales->periodDays() ?? 30;
+        $items = [];
+        $line = function (string $warehouse, string $sku, string $name, ?string $brand) use (&$items, $regions, $days): string {
+            $key = $warehouse.'|'.$sku;
+            $items[$key] ??= [
+                'region' => $regions[$warehouse],
+                'warehouse' => $warehouse,
+                'sku' => $sku,
+                'product_name' => mb_substr(ItemName::label($name, $brand), 0, 255),
+                'stock' => 0,
+                'incoming' => 0,
+                'sales_qty' => 0,
+                'sales_days' => $days,
+            ];
+
+            return $key;
+        };
+
+        foreach ($report['rows'] as $row) {
+            if ($row['qty'] <= 0 || ! ItemName::describe($row['name'], $row['sort_code'])[2]) {
+                continue;
+            }
+
+            $isTransit = str_starts_with($row['warehouse'], self::TRANSIT_PREFIX);
+            $warehouse = $isTransit ? 'GM'.substr($row['warehouse'], strlen(self::TRANSIT_PREFIX)) : $row['warehouse'];
+
+            if (! isset($regions[$warehouse])) {
+                continue;
+            }
+
+            $key = $line($warehouse, $row['sku'], $row['name'], $row['brand']);
+            $items[$key][$isTransit ? 'incoming' : 'stock'] += $row['qty'];
+        }
+
+        foreach ($sales->items()->where('is_unit', true)->where('qty', '>', 0)->get() as $item) {
+            $warehouse = strtoupper($item->kode_gudang);
+
+            if (isset($regions[$warehouse])) {
+                $key = $line($warehouse, $item->kode_barang, $item->nama_barang, $item->brand);
+                $items[$key]['sales_qty'] += $item->qty;
+            }
+        }
+
+        $rows = array_values(array_filter($items, fn (array $item): bool => ! in_array($item['region'], self::EXCLUDED_REGIONS, true)));
+
+        return [$rows, [
+            'stock_date' => $report['stock_date'],
+            'sales_import_id' => $sales->id,
+            'sales_start' => $sales->period_start,
+            'sales_end' => $sales->period_end,
+        ]];
+    }
+
+    /**
+     * Laporan penjualan terbaru yang periodenya berakhir sebelum/pada tanggal stok (kalau tidak ada, yang terbaru).
+     */
+    private function salesImportFor(?string $stockDate): ?CsaImport
+    {
+        $query = fn () => CsaImport::query()
+            ->where('status', 'completed')
+            ->where('report_type', CsaImport::REPORT_SALES)
+            ->whereHas('items')
+            ->orderByDesc('period_end')
+            ->orderByDesc('id');
+
+        return ($stockDate !== null ? $query()->whereDate('period_end', '<=', $stockDate)->first() : null) ?? $query()->first();
     }
 
     private function status(?float $dos, int $target): string

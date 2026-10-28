@@ -12,7 +12,7 @@ class ShipmentsRelationManager extends RelationManager
 {
     protected static string $relationship = 'shipments';
 
-    protected static ?string $title = 'Data Surat Jalan Pengiriman (Upload Ini)';
+    protected static ?string $title = 'Surat Jalan';
 
     protected static ?string $modelLabel = 'Surat Jalan';
 

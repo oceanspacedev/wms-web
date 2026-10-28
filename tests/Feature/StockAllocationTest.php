@@ -341,6 +341,101 @@ class StockAllocationTest extends TestCase
             ->assertActionHidden('recalculate');
     }
 
+    public function test_changed_qty_cannot_exceed_the_stock_the_source_has_left(): void
+    {
+        $allocation = $this->allocate();
+        $service = app(StockAllocationService::class);
+        // GTC stok 400 sudah dipakai 270 ke GTBDG, jadi ke GTKRW maksimal 130
+        $toKarawang = $this->transfer($allocation, 'GTC', 'GTKRW');
+
+        $this->assertSame(130, $service->availableQty($toKarawang));
+
+        try {
+            $service->changeQty($toKarawang, 200, null);
+            $this->fail('Qty melebihi stok gudang pengirim seharusnya ditolak');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('tinggal 130 unit', $exception->getMessage());
+        }
+
+        $this->assertSame(10, $toKarawang->refresh()->qty);
+
+        $service->changeQty($toKarawang, 130, null);
+        $this->assertSame(0, $allocation->lines()->where('warehouse', 'GTC')->sole()->stockAfter());
+    }
+
+    public function test_rejected_transfer_cannot_be_used_again_once_its_stock_went_to_another_transfer(): void
+    {
+        $allocation = $this->allocate();
+        $service = app(StockAllocationService::class);
+        $toBandung = $this->transfer($allocation, 'GTC', 'GTBDG');
+
+        $service->decide($allocation, [$toBandung], StockAllocationTransfer::STATUS_REJECTED, null);
+        $service->changeQty($this->transfer($allocation, 'GTC', 'GTKRW'), 300, null);
+
+        $this->expectException(RuntimeException::class);
+
+        try {
+            $service->decide($allocation, [$toBandung->refresh()], StockAllocationTransfer::STATUS_APPROVED, null);
+        } finally {
+            $this->assertSame(StockAllocationTransfer::STATUS_REJECTED, $toBandung->refresh()->status);
+            $this->assertGreaterThanOrEqual(0, $allocation->lines()->where('warehouse', 'GTC')->sole()->stockAfter());
+        }
+    }
+
+    public function test_detail_page_limits_changed_qty_and_explains_a_refused_approval(): void
+    {
+        $allocation = $this->allocate();
+        $this->actingAsAdmin(['ViewAny:StockAllocation', 'View:StockAllocation', 'Update:StockAllocation']);
+        $page = ['ownerRecord' => $allocation, 'pageClass' => ViewStockAllocation::class];
+        $toBandung = $this->transfer($allocation, 'GTC', 'GTBDG');
+        $toKarawang = $this->transfer($allocation, 'GTC', 'GTKRW');
+
+        Livewire::test(TransfersRelationManager::class, $page)
+            ->callAction(TestAction::make('changeQty')->table($toKarawang), data: ['qty' => 200])
+            ->assertHasFormErrors(['qty' => 'max']);
+
+        $this->assertSame(10, $toKarawang->refresh()->qty);
+
+        $service = app(StockAllocationService::class);
+        $service->decide($allocation, [$toBandung], StockAllocationTransfer::STATUS_REJECTED, null);
+        $service->changeQty($toKarawang, 300, null);
+
+        Livewire::test(TransfersRelationManager::class, $page)
+            ->callAction(TestAction::make('approve')->table($toBandung->refresh()))
+            ->assertNotified('Tidak bisa disimpan');
+
+        $this->assertSame(StockAllocationTransfer::STATUS_REJECTED, $toBandung->refresh()->status);
+    }
+
+    public function test_allocation_with_mutation_documents_cannot_be_deleted(): void
+    {
+        $allocation = $this->allocate();
+        app(StockAllocationService::class)->decide($allocation, [$this->transfer($allocation, 'GTC', 'GTBDG')], StockAllocationTransfer::STATUS_APPROVED, null);
+        $mutation = app(StockMutationService::class)->createFromApproved($allocation, null)->sole();
+        app(StockMutationService::class)->ship($mutation, 'mobil gudang', null);
+        $this->actingAsAdmin(['ViewAny:StockAllocation', 'View:StockAllocation', 'Update:StockAllocation', 'Delete:StockAllocation', 'DeleteAny:StockAllocation']);
+
+        Livewire::test(ViewStockAllocation::class, ['record' => $allocation->getRouteKey()])
+            ->assertActionHidden('delete');
+
+        Livewire::test(ListStockAllocations::class)
+            ->assertActionHidden(TestAction::make('delete')->table($allocation))
+            ->selectTableRecords([$allocation])
+            ->callAction(TestAction::make('delete')->table()->bulk());
+
+        $this->assertFalse($allocation->delete());
+        $this->assertModelExists($allocation);
+        $this->assertModelExists($mutation);
+    }
+
+    public function test_allocation_without_mutation_documents_can_still_be_deleted(): void
+    {
+        $allocation = $this->allocate();
+
+        $this->assertTrue($allocation->delete());
+        $this->assertModelMissing($allocation);
+    }
+
     public function test_cancelling_a_mutation_unlocks_its_transfers(): void
     {
         $allocation = $this->allocate();

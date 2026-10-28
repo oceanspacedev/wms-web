@@ -35,12 +35,24 @@ class WarehouseMappingSeeder extends Seeder
             ['csa_code' => 'RF', 'csa_name' => 'GUDANG REFUND', 'target_sheet' => 'RETUR'],
         ];
 
+        // Region Alokasi Stok: PUSAT terhubung ke semua region; gudang tanpa region tidak ikut
+        $regions = [
+            'GMJKT' => 'PUSAT',
+            'GMBDG' => 'JAWA BARAT', 'GMCRB' => 'JAWA BARAT',
+            'GMSMG' => 'JAWA TENGAH', 'GMPWT' => 'JAWA TENGAH',
+            'GMSBY' => 'JAWA TIMUR',
+            'GMMDN' => 'SUMATERA UTARA & TENGAH', 'GMPKU' => 'SUMATERA UTARA & TENGAH', 'GMPDG' => 'SUMATERA UTARA & TENGAH',
+            'GMJMB' => 'SUMATERA SELATAN', 'GMPLB' => 'SUMATERA SELATAN', 'GMBKL' => 'SUMATERA SELATAN', 'GMLMP' => 'SUMATERA SELATAN',
+            'GMMKS' => 'SULAWESI', 'GMMDO' => 'SULAWESI', 'GMPLU' => 'SULAWESI',
+        ];
+
         foreach ($mappings as $mapping) {
             WarehouseMapping::updateOrCreate(
                 ['csa_code' => $mapping['csa_code']],
                 [
                     'csa_name' => $mapping['csa_name'],
                     'target_sheet' => $mapping['target_sheet'],
+                    'region' => $regions[$mapping['csa_code']] ?? null,
                     'is_active' => true,
                 ]
             );

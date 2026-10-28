@@ -12,6 +12,7 @@ use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Support\Enums\Alignment;
 use Filament\Tables\Columns\TextColumn;
@@ -19,6 +20,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use RuntimeException;
 
 /**
  * Saran pindah stok antar gudang; admin bisa setujui, ubah qty, atau tolak.
@@ -68,6 +70,8 @@ class TransfersRelationManager extends RelationManager
                     ->description(fn (StockAllocationTransfer $record): ?string => $record->qty !== $record->suggested_qty
                         ? 'saran '.$record->suggested_qty
                         : null)
+                    // Alasan saran saat kursor diarahkan ke qty
+                    ->tooltip(fn (StockAllocationTransfer $record): string => $this->reason($record))
                     ->sortable(),
                 // Saran yang belum diputuskan cukup teks abu-abu; badge hanya untuk yang sudah disetujui/ditolak
                 TextColumn::make('status')
@@ -116,15 +120,15 @@ class TransfersRelationManager extends RelationManager
                                 ->numeric()
                                 ->integer()
                                 ->minValue(1)
-                                ->maxValue(fn (StockAllocationTransfer $record): int => max(1, (int) $record->fromLine?->stock))
+                                // Stok pengirim dikurangi saran lain dari gudang yang sama, supaya stoknya tidak minus
+                                ->maxValue(fn (StockAllocationTransfer $record): int => max(1, app(StockAllocationService::class)->availableQty($record)))
                                 ->suffix('unit')
-                                ->helperText(fn (StockAllocationTransfer $record): string => 'Saran '.$record->suggested_qty.' · stok '.$record->from_warehouse.' '.(int) $record->fromLine?->stock)
+                                ->helperText(fn (StockAllocationTransfer $record): string => 'Saran '.$record->suggested_qty.' · maks. '.app(StockAllocationService::class)->availableQty($record).' (stok '.$record->from_warehouse.' '.(int) $record->fromLine?->stock.')')
                                 ->required(),
                         ])
-                        ->action(function (StockAllocationTransfer $record, array $data): void {
-                            app(StockAllocationService::class)->changeQty($record, (int) $data['qty'], auth()->id());
-                            $this->dispatch('stock-allocation-updated');
-                        }),
+                        ->action(fn (StockAllocationTransfer $record, array $data) => $this->run(
+                            fn () => app(StockAllocationService::class)->changeQty($record, (int) $data['qty'], auth()->id()),
+                        )),
                     Action::make('reject')
                         ->label('Tolak')
                         ->icon('heroicon-o-x-mark')
@@ -161,7 +165,22 @@ class TransfersRelationManager extends RelationManager
      */
     private function decide(iterable $transfers, string $status): void
     {
-        app(StockAllocationService::class)->decide($this->ownerRecord, $transfers, $status, auth()->id());
+        $this->run(fn () => app(StockAllocationService::class)->decide($this->ownerRecord, $transfers, $status, auth()->id()));
+    }
+
+    /**
+     * Jalankan perubahan; yang ditolak aturan (stok tidak cukup, sudah masuk dokumen) cukup jadi notifikasi.
+     */
+    private function run(callable $change): void
+    {
+        try {
+            $change();
+        } catch (RuntimeException $exception) {
+            Notification::make()->title('Tidak bisa disimpan')->body($exception->getMessage())->danger()->send();
+
+            return;
+        }
+
         $this->dispatch('stock-allocation-updated');
     }
 
@@ -182,6 +201,32 @@ class TransfersRelationManager extends RelationManager
         return $stock.' · '.($line->dos_before === null
             ? 'tidak laku'
             : 'DOS '.StockAllocationResource::days($line->dos_before).' → '.StockAllocationResource::days($line->dos_after));
+    }
+
+    /**
+     * "GMBDG laku 21/hari, stok cukup 5 hari → kurang 530 unit untuk 30 hari. GMCRB stok cukup 300 hari → lebih 810 unit."
+     */
+    public function reason(StockAllocationTransfer $transfer): string
+    {
+        $to = $transfer->toLine;
+        $from = $transfer->fromLine;
+
+        if ($to === null || $from === null) {
+            return '';
+        }
+
+        $target = $this->ownerRecord->target_dos;
+        $number = fn (float $value): string => number_format($value, $value > 0 && $value < 10 ? 1 : 0, ',', '.');
+        $cover = fn (StockAllocationLine $line): string => $line->dos_before === null ? 'tidak laku' : 'stok cukup '.StockAllocationResource::days($line->dos_before).' hari';
+        $extra = max(0, (int) floor($from->stock - $target * (float) $from->avg_daily_sales));
+
+        $hub = fn (StockAllocationLine $line): string => $line->region === StockAllocationService::HUB_REGION ? ' (pusat)' : '';
+
+        return $to->warehouse.$hub($to).' laku '.$number((float) $to->avg_daily_sales).'/hari, '.$cover($to)
+            .($to->incoming > 0 ? ' (+'.$number($to->incoming).' di jalan)' : '')
+            .' → kurang '.$number($to->need_qty).' unit untuk '.$target.' hari. '
+            .$from->warehouse.$hub($from).' '.$cover($from)
+            .' → lebih '.$number($extra).' unit.';
     }
 
     /**

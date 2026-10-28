@@ -17,6 +17,10 @@ class StockAllocation extends Model
     protected $fillable = [
         'name',
         'file_name',
+        'stock_date',
+        'sales_import_id',
+        'sales_start',
+        'sales_end',
         'target_dos',
         'min_transfer_qty',
         'warehouse_count',
@@ -28,12 +32,21 @@ class StockAllocation extends Model
         'created_by',
     ];
 
+    protected static function booted(): void
+    {
+        // Dokumen mutasi adalah riwayat barang yang dipindah; alokasinya tidak boleh dihapus (dokumen ikut terhapus)
+        static::deleting(fn (StockAllocation $allocation): bool => ! $allocation->mutations()->exists());
+    }
+
     /**
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
+            'stock_date' => 'date',
+            'sales_start' => 'date',
+            'sales_end' => 'date',
             'target_dos' => 'integer',
             'min_transfer_qty' => 'integer',
             'warehouse_count' => 'integer',
@@ -75,6 +88,24 @@ class StockAllocation extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Laporan penjualan yang dipakai sebagai angka laku (alokasi dari laporan stok ERP).
+     *
+     * @return BelongsTo<CsaImport, $this>
+     */
+    public function salesImport(): BelongsTo
+    {
+        return $this->belongsTo(CsaImport::class, 'sales_import_id');
+    }
+
+    /**
+     * Dihitung dari laporan stok ERP + laporan penjualan WMS (bukan file DOS olahan).
+     */
+    public function usesStockReport(): bool
+    {
+        return $this->stock_date !== null;
     }
 
     /**

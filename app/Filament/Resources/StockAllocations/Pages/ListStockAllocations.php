@@ -26,12 +26,12 @@ class ListStockAllocations extends ListRecords
                 ->label('Upload Data Stok')
                 ->visible(fn (): bool => auth()->user()?->can('create', StockAllocation::class) ?? false)
                 ->modalHeading('Hitung Alokasi Stok')
-                ->modalDescription('Upload file DOS (tab "Data": GUDANG, REGION, KETERANGAN, QTY, KODE_SKU).')
+                ->modalDescription('Upload laporan stok ERP [XRSTOK02]: angka laku diambil otomatis dari laporan penjualan terakhir di Laporan Penjualan CSA. File DOS (tab "Data") juga masih bisa.')
                 ->modalWidth(Width::Large)
                 ->modalSubmitActionLabel('Hitung')
                 ->schema([
                     FileUpload::make('file')
-                        ->label('File stok & penjualan (.xlsx)')
+                        ->label('File stok (.xlsx)')
                         ->disk('local')
                         ->directory('stock-allocation-imports')
                         ->acceptedFileTypes([

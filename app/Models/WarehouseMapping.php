@@ -16,6 +16,7 @@ class WarehouseMapping extends Model
         'csa_code',
         'csa_name',
         'target_sheet',
+        'region',
         'is_active',
     ];
 

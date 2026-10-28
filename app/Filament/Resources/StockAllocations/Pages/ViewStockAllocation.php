@@ -19,6 +19,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Enums\IconPosition;
 use Filament\Support\Enums\Width;
 use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Support\HtmlString;
 use Livewire\Attributes\On;
 
 /**
@@ -54,11 +55,17 @@ class ViewStockAllocation extends ViewRecord
      */
     public function getSubheading(): ?string
     {
+        $record = $this->record;
+
         return implode(' · ', array_filter([
-            $this->record->created_at?->format('d/m/Y H:i'),
-            $this->record->warehouse_count.' gudang',
-            $this->record->sku_count.' SKU',
-            'target DOS '.$this->record->target_dos.' hari',
+            // Dari laporan stok ERP: tanggal posisi stok & periode penjualan yang dipakai sebagai angka laku
+            $record->usesStockReport() ? 'stok '.$record->stock_date->format('d/m/Y') : $record->created_at?->format('d/m/Y H:i'),
+            $record->sales_start && $record->sales_end
+                ? 'laku '.$record->sales_start->format('d/m').'–'.$record->sales_end->format('d/m/Y').' ('.((int) $record->sales_start->diffInDays($record->sales_end) + 1).' hari)'
+                : null,
+            $record->warehouse_count.' gudang',
+            $record->sku_count.' SKU',
+            'target DOS '.$record->target_dos.' hari',
         ]));
     }
 
@@ -77,6 +84,15 @@ class ViewStockAllocation extends ViewRecord
     {
         return [
             ActionGroup::make([
+                Action::make('howItWorks')
+                    ->label('Cara Hitung')
+                    ->icon('heroicon-o-information-circle')
+                    ->modalHeading('Cara Hitung Alokasi Stok')
+                    ->modalContent(fn (): HtmlString => $this->explanation())
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Tutup')
+                    ->modalWidth(Width::Large),
+
                 // Saran yang disetujui → dokumen mutasi per rute (tab Dokumen Mutasi)
                 Action::make('createMutations')
                     ->label('Buat Dokumen Mutasi')
@@ -149,7 +165,9 @@ class ViewStockAllocation extends ViewRecord
                         $this->redirect(StockAllocationResource::getUrl('view', ['record' => $this->record]));
                     }),
 
-                DeleteAction::make(),
+                // Sudah ada dokumen mutasi: tidak bisa dihapus (lihat StockAllocation::booted)
+                DeleteAction::make()
+                    ->hidden(fn (): bool => $this->record->mutations()->exists()),
             ])
                 ->label('Aksi')
                 ->icon('heroicon-m-chevron-down')
@@ -157,5 +175,34 @@ class ViewStockAllocation extends ViewRecord
                 ->button()
                 ->color('gray'),
         ];
+    }
+
+    /**
+     * Penjelasan singkat rumus & aturan yang dipakai hitungan ini (gaya sebaris supaya tidak perlu build CSS).
+     */
+    private function explanation(): HtmlString
+    {
+        $record = $this->record;
+        $target = $record->target_dos;
+
+        $sources = $record->usesStockReport()
+            ? 'Stok dari laporan stok ERP per '.$record->stock_date->format('d/m/Y').'. Laku dari laporan penjualan '
+                .($record->sales_start && $record->sales_end ? $record->sales_start->format('d/m/Y').' – '.$record->sales_end->format('d/m/Y') : 'terakhir')
+                .'. Barang di gudang transit (#HPM…) dihitung sebagai incoming depo tujuannya. Hanya HP &amp; tablet di gudang yang punya region di Pemetaan Gudang.'
+            : 'Stok, laku 30 hari, dan incoming dari file DOS yang di-upload.';
+
+        $points = [
+            '<b>Data.</b> '.$sources,
+            '<b>Laku per hari</b> = jumlah terjual ÷ jumlah hari periode penjualan.',
+            '<b>DOS</b> = stok ÷ laku per hari, artinya stok cukup untuk berapa hari. ≤ 7 hari KRITIS, ≤ 14 WASPADA, ≤ '.$target.' AMAN, lebih dari itu OVERSTOCK.',
+            '<b>Kebutuhan</b> gudang = '.$target.' hari × laku per hari − stok − incoming.',
+            '<b>Bisa dikirim</b> = stok fisik − '.$target.' hari × laku per hari. Incoming tidak dihitung supaya gudang pengirim tidak kosong kalau barang di jalan terlambat. Barang yang tidak laku di suatu gudang bisa dikirim semuanya.',
+            '<b>Urutan.</b> Gudang paling kritis dilayani lebih dulu, diambil dari gudang paling berlebih di region yang sama, lalu dari gudang PUSAT. PUSAT terhubung ke semua region: bisa mengirim ke depo mana pun dan menerima dari depo mana pun kalau stoknya sendiri kurang.',
+            '<b>Minimal</b> '.$record->min_transfer_qty.' unit per saran. Kekurangan yang tidak tertutup transfer menjadi <b>Sisa PO</b>.',
+        ];
+
+        return new HtmlString('<ul style="display:grid;gap:10px;margin:0;padding-left:18px;list-style:disc;font-size:14px;line-height:1.5">'
+            .implode('', array_map(fn (string $point): string => '<li>'.$point.'</li>', $points))
+            .'</ul>');
     }
 }

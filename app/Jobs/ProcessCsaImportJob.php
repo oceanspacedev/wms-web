@@ -58,6 +58,8 @@ class ProcessCsaImportJob implements ShouldQueue
 
             $this->csaImport->update([
                 'report_type' => $reportType,
+                'period_start' => $result['period'][0] ?? null,
+                'period_end' => $result['period'][1] ?? null,
                 'total_raw_rows' => $result['total_raw_rows'],
                 'total_shipments' => $result['total_shipments'],
                 'summary_by_sheet' => $result['by_sheet'],
@@ -66,6 +68,8 @@ class ProcessCsaImportJob implements ShouldQueue
             [$totalNew, $totalUpdated, $totalSkipped] = $reportType === CsaImport::REPORT_TRANSFER
                 ? $this->saveTransferOrders($result['shipments'])
                 : $this->saveShipments($result['shipments']);
+
+            $this->saveItems($result['items'] ?? []);
 
             $this->csaImport->update([
                 'status' => 'completed',
@@ -218,6 +222,23 @@ class ProcessCsaImportJob implements ShouldQueue
         }
 
         return [$totalNew, $totalUpdated, $totalSkipped];
+    }
+
+    /**
+     * Ringkasan penjualan per gudang per barang milik upload ini; proses ulang menggantinya, bukan menambah.
+     *
+     * @param  list<array<string, mixed>>  $items
+     */
+    protected function saveItems(array $items): void
+    {
+        $this->csaImport->items()->delete();
+
+        foreach (array_chunk($items, 500) as $chunk) {
+            DB::table('csa_import_items')->insert(array_map(
+                fn (array $item): array => ['csa_import_id' => $this->csaImport->id] + $item,
+                $chunk,
+            ));
+        }
     }
 
     /**

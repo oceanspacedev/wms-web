@@ -56,6 +56,15 @@ class WarehouseMappingResource extends Resource
                     ->required()
                     ->columnSpanFull(),
 
+                TextInput::make('region')
+                    ->label('Region Alokasi Stok')
+                    ->placeholder('Contoh: JAWA BARAT')
+                    ->datalist(fn (): array => WarehouseMapping::query()->whereNotNull('region')->distinct()->orderBy('region')->pluck('region')->all())
+                    ->helperText('Gudang satu region saling kirim stok; PUSAT bisa kirim ke dan terima dari semua region. Kosongkan kalau gudang tidak ikut (online, retur, sales).')
+                    ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? strtoupper(trim($state)) : null)
+                    ->maxLength(50)
+                    ->columnSpanFull(),
+
                 Toggle::make('is_active')
                     ->label('Aktif')
                     ->default(true)
@@ -83,6 +92,11 @@ class WarehouseMappingResource extends Resource
                     ->badge()
                     ->color('primary')
                     ->searchable()
+                    ->sortable(),
+
+                TextColumn::make('region')
+                    ->label('Region')
+                    ->placeholder('Tidak ikut alokasi')
                     ->sortable(),
 
                 IconColumn::make('is_active')

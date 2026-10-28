@@ -33,6 +33,8 @@ class CsaImport extends Model
         'file_name',
         'file_path',
         'report_type',
+        'period_start',
+        'period_end',
         'status',
         'total_raw_rows',
         'total_shipments',
@@ -55,6 +57,8 @@ class CsaImport extends Model
         'total_skipped' => 'integer',
         'total_synced' => 'integer',
         'summary_by_sheet' => 'array',
+        'period_start' => 'date',
+        'period_end' => 'date',
     ];
 
     /**
@@ -73,8 +77,26 @@ class CsaImport extends Model
         return $this->hasMany(CsaShipment::class);
     }
 
+    /**
+     * @return HasMany<CsaImportItem, $this>
+     */
+    public function items(): HasMany
+    {
+        return $this->hasMany(CsaImportItem::class);
+    }
+
     public function reportLabel(): string
     {
         return self::REPORT_LABELS[$this->report_type] ?? self::REPORT_LABELS[self::REPORT_SALES];
+    }
+
+    /**
+     * Jumlah hari periode laporan, termasuk tanggal awal & akhir (1–27 Oktober = 27 hari).
+     */
+    public function periodDays(): ?int
+    {
+        return $this->period_start && $this->period_end
+            ? (int) $this->period_start->diffInDays($this->period_end) + 1
+            : null;
     }
 }
