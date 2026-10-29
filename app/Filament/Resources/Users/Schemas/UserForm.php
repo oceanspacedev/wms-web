@@ -65,7 +65,7 @@ class UserForm
                             TextInput::make('email')
                                 ->label('Email Address')
                                 ->email()
-                                ->required()
+                                ->nullable()
                                 ->unique(ignoreRecord: true)
                                 ->maxLength(255),
                             TextInput::make('whatsapp_number')

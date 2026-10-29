@@ -7,6 +7,7 @@ use App\Jobs\SendUserAccountActivatedWhatsAppJob;
 use App\Models\User;
 use App\Services\WhatsAppNotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -133,6 +134,46 @@ class UserAccountActivatedWhatsAppTest extends TestCase
             ->withArgs(fn (string $message, array $context): bool => $message === 'Gagal mengirim WhatsApp akun aktif ke user baru'
                 && $context['user_id'] === $user->id)
             ->once();
+    }
+
+    public function test_messages_for_many_accounts_are_queued_one_by_one_with_a_gap(): void
+    {
+        Queue::fake();
+        $users = User::factory()->count(3)->create();
+
+        SendUserAccountActivatedWhatsAppJob::dispatchOneByOne(
+            $users->map(fn (User $user): SendUserAccountActivatedWhatsAppJob => new SendUserAccountActivatedWhatsAppJob($user->id, 'k7mp2xq9ab'))->all(),
+        );
+
+        // Hanya pesan pertama yang langsung masuk antrean; sisanya menunggu pesan sebelumnya selesai
+        $first = Queue::pushed(SendUserAccountActivatedWhatsAppJob::class)->sole();
+        $this->assertSame($users->first()->id, $first->userId);
+        $this->assertNull($first->delay);
+
+        $next = array_map(unserialize(...), $first->chained);
+        $this->assertSame($users->skip(1)->pluck('id')->all(), array_column($next, 'userId'));
+
+        foreach ($next as $job) {
+            $this->assertGreaterThanOrEqual(SendUserAccountActivatedWhatsAppJob::GAP_SECONDS[0], $job->delay);
+            $this->assertLessThanOrEqual(SendUserAccountActivatedWhatsAppJob::GAP_SECONDS[1], $job->delay);
+        }
+    }
+
+    public function test_message_waits_while_another_message_is_being_sent(): void
+    {
+        $this->configureGateway();
+        Http::fake(['https://wag.test/api/v1/messages' => Http::response(['ok' => true], 202)]);
+        $user = User::factory()->create(['whatsapp_number' => '081298765436']);
+        $job = new SendUserAccountActivatedWhatsAppJob($user->id);
+        $lock = Cache::lock($job->middleware()[0]->getLockKey($job), 60);
+        $lock->get();
+
+        dispatch($job);
+        Http::assertNothingSent();
+
+        $lock->release();
+        dispatch(new SendUserAccountActivatedWhatsAppJob($user->id));
+        Http::assertSentCount(1);
     }
 
     private function runJob(User $user, ?string $password = null): void

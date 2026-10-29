@@ -5,12 +5,10 @@ namespace App\Services;
 use App\Jobs\SendUserAccountActivatedWhatsAppJob;
 use App\Models\User;
 use App\Support\WhatsAppNumber;
-use BezhanSalleh\FilamentShield\Support\Utils;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use JsonException;
 use RuntimeException;
-use Spatie\Permission\Models\Role;
 
 /**
  * Buat akun aplikasi WMS untuk kurir gudang dari export direktori karyawan Talenta (JSON).
@@ -28,6 +26,8 @@ class TalentaCourierImporter
      */
     public const JOB_KEYWORDS = ['KURIR', 'DRIVER'];
 
+    public function __construct(private ImportedAccountCreator $accounts) {}
+
     /**
      * Semua akun dibuat dalam satu transaksi: kalau gagal di tengah jalan, tidak ada akun yang tersimpan.
      * Karyawan yang email atau nomor WhatsApp-nya sudah dipakai akun lain dilewati, jadi file yang sama aman diimpor ulang.
@@ -39,8 +39,8 @@ class TalentaCourierImporter
         $couriers = array_values(array_filter($this->employees($json), $this->isWarehouseCourier(...)));
 
         return DB::transaction(function () use ($couriers, $sendWhatsApp): array {
-            $panelUserRole = Role::firstOrCreate(['name' => Utils::getPanelUserRoleName(), 'guard_name' => 'web']);
             $result = ['created' => [], 'existing' => [], 'incomplete' => []];
+            $messages = [];
 
             foreach ($couriers as $employee) {
                 $name = $this->name($employee);
@@ -64,21 +64,14 @@ class TalentaCourierImporter
                     continue;
                 }
 
-                $password = $this->readablePassword();
-                $user = User::create([
-                    'name' => $name,
-                    'username' => $this->uniqueUsername($email),
-                    'email' => $email,
-                    'whatsapp_number' => $whatsAppNumber,
-                    'password' => $password,
-                ]);
-                $user->syncRoles([$panelUserRole]);
-
-                if ($sendWhatsApp) {
-                    SendUserAccountActivatedWhatsAppJob::dispatch((int) $user->id, $password)->afterCommit();
-                }
+                // Username dari bagian email sebelum "@" (mis. "dinoliardii1")
+                $messages[] = $this->accounts->create($name, $whatsAppNumber, $email, Str::before($email, '@'), 'kurir');
 
                 $result['created'][] = $name;
+            }
+
+            if ($sendWhatsApp) {
+                SendUserAccountActivatedWhatsAppJob::dispatchOneByOne($messages);
             }
 
             return $result;
@@ -129,37 +122,5 @@ class TalentaCourierImporter
         $fullName = Str::squish(($employee['first_name'] ?? '').' '.($employee['last_name'] ?? ''));
 
         return mb_convert_case($fullName, MB_CASE_TITLE, 'UTF-8');
-    }
-
-    /**
-     * Password acak 10 karakter tanpa huruf/angka yang mirip (0/o, 1/l/i), supaya mudah diketik ulang dari pesan WhatsApp.
-     */
-    private function readablePassword(): string
-    {
-        $alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
-
-        return implode('', array_map(fn (): string => $alphabet[random_int(0, strlen($alphabet) - 1)], range(1, 10)));
-    }
-
-    /**
-     * Username dari bagian email sebelum "@" (mis. "dinoliardii1"), diberi akhiran angka kalau sudah dipakai.
-     * Karakter yang tidak boleh ada di username, seperti titik, diganti garis bawah.
-     */
-    private function uniqueUsername(string $email): string
-    {
-        $localPart = preg_replace('/[^a-z0-9_-]+/', '_', Str::before($email, '@')) ?? '';
-        $base = trim(substr(trim($localPart, '_-'), 0, 45), '_-');
-
-        if (strlen($base) < 3) {
-            $base = 'kurir'.($base === '' ? '' : '_'.$base);
-        }
-
-        $username = $base;
-
-        for ($suffix = 2; User::query()->where('username', $username)->exists(); $suffix++) {
-            $username = "{$base}_{$suffix}";
-        }
-
-        return $username;
     }
 }
