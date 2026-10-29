@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Users\Pages;
 use App\Filament\Resources\Users\UserResource;
 use App\Models\User;
 use App\Services\TalentaCourierImporter;
+use App\Services\UserExporter;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
@@ -14,6 +15,7 @@ use Filament\Resources\Pages\ListRecords;
 use Filament\Support\Enums\Width;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ListUsers extends ListRecords
 {
@@ -22,6 +24,14 @@ class ListUsers extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('export')
+                ->label('Export Excel')
+                ->color('gray')
+                ->action(fn (): StreamedResponse => app(UserExporter::class)->download(
+                    $this->getFilteredSortedTableQuery(),
+                    'Daftar Pengguna '.now()->format('Y-m-d').'.xlsx',
+                )),
+
             Action::make('importTalentaCouriers')
                 ->label('Import Kurir Talenta')
                 ->color('gray')
