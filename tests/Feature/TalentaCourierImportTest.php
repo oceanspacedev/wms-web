@@ -47,11 +47,13 @@ class TalentaCourierImportTest extends TestCase
 
         // Staff gudang, driver & kurir di luar gudang, akun yang sudah ada, dan data tanpa WhatsApp tidak dibuatkan akun
         $this->assertSame(5, User::count());
-        Queue::assertPushed(SendUserAccountActivatedWhatsAppJob::class, 3);
+        // Satu antrean berisi 3 pesan yang dikirim bergiliran
+        $messages = $this->activationMessages();
+        $this->assertCount(3, $messages);
         // Password awal yang dikirim ke WhatsApp memang password akun itu, dan mudah diketik ulang
-        Queue::assertPushed(SendUserAccountActivatedWhatsAppJob::class, fn (SendUserAccountActivatedWhatsAppJob $job): bool => $job->userId === $courier->id
-            && preg_match('/^[a-z2-9]{10}$/', (string) $job->password) === 1
-            && Hash::check((string) $job->password, $courier->password));
+        $courierMessage = collect($messages)->firstWhere('userId', $courier->id);
+        $this->assertMatchesRegularExpression('/^[a-z2-9]{10}$/', (string) $courierMessage->password);
+        $this->assertTrue(Hash::check((string) $courierMessage->password, $courier->password));
         $this->assertSame([], Storage::disk('local')->allFiles('talenta-imports'));
     }
 
@@ -155,6 +157,18 @@ class TalentaCourierImportTest extends TestCase
                 '_total_data' => 8,
             ],
         ]);
+    }
+
+    /**
+     * Pesan WhatsApp akun aktif yang diantrekan: job pertama, lalu job berikutnya di chain-nya.
+     *
+     * @return list<SendUserAccountActivatedWhatsAppJob>
+     */
+    private function activationMessages(): array
+    {
+        $first = Queue::pushed(SendUserAccountActivatedWhatsAppJob::class)->sole();
+
+        return [$first, ...array_map(unserialize(...), $first->chained)];
     }
 
     private function userAdmin(): User

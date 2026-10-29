@@ -38,6 +38,8 @@ class User extends Authenticatable implements FilamentUser, HasAvatar
                     $user->email_verified_at = now();
                 }
             } else {
+                // Email boleh kosong; simpan null supaya tidak bentrok dengan unique index
+                $user->email = null;
                 $user->email_verified_at = null;
             }
 

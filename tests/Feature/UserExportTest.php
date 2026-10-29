@@ -2,12 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Exports\UserExporter;
 use App\Filament\Resources\Users\Pages\ListUsers;
 use App\Models\User;
-use App\Services\UserExporter;
-use DateTimeImmutable;
+use Filament\Actions\Exports\Models\Export;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use OpenSpout\Reader\XLSX\Reader;
 use Spatie\Permission\Models\Permission;
@@ -18,51 +19,47 @@ class UserExportTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_export_writes_the_user_columns_without_password(): void
+    public function test_export_writes_the_filtered_users_without_password(): void
     {
-        $user = User::factory()->withUsername('kurir_satu')->withVerifiedWhatsApp('6281200000001')->create([
+        Storage::fake('local');
+        $this->actingAs($this->userAdmin(['ViewAny:User']));
+        $courierRole = Role::findOrCreate('gudang', 'web');
+        $courier = User::factory()->withUsername('kurir_satu')->withVerifiedWhatsApp('6281200000001')->create([
             'name' => 'Kurir Satu',
             'email' => 'kurir.satu@example.com',
             'kode_gudang_arsip' => 'GDG-BDG-01',
             'cabang' => 'CIREBON',
             'created_at' => Carbon::parse('2026-10-01 08:30:00'),
         ]);
-        $user->assignRole(Role::findOrCreate('gudang', 'web'), Role::findOrCreate('panel_user', 'web'));
-
-        $path = tempnam(sys_get_temp_dir(), 'export').'.xlsx';
-        app(UserExporter::class)->write(User::query()->orderBy('id'), $path);
-        $rows = $this->readRows($path);
-        @unlink($path);
-
-        $this->assertSame(UserExporter::HEADERS, $rows[0]);
-        $this->assertSame(['Kurir Satu', 'kurir_satu', 'kurir.satu@example.com'], array_slice($rows[1], 0, 3));
-        // Nomor WhatsApp tetap teks, bukan angka
-        $this->assertSame('6281200000001', $rows[1][3]);
-        $this->assertSame('gudang, panel_user', $rows[1][4]);
-        $this->assertSame(['GDG-BDG-01', 'CIREBON'], array_slice($rows[1], 5, 2));
-        $this->assertEquals(new DateTimeImmutable('2026-10-01 08:30:00'), $rows[1][7]);
-        $this->assertNotContains($user->password, $rows[1]);
-    }
-
-    public function test_export_action_downloads_the_filtered_users(): void
-    {
-        $admin = $this->userAdmin();
-        $this->actingAs($admin);
-        $courierRole = Role::findOrCreate('gudang', 'web');
-        User::factory()->create(['name' => 'Kurir Gudang'])->assignRole($courierRole);
+        $courier->assignRole($courierRole, Role::findOrCreate('panel_user', 'web'));
         User::factory()->create(['name' => 'Staff Lain']);
 
-        $component = Livewire::test(ListUsers::class)
+        Livewire::test(ListUsers::class)
             ->filterTable('roles', $courierRole->id)
             ->callAction('export')
-            ->assertFileDownloaded('Daftar Pengguna '.now()->format('Y-m-d').'.xlsx');
+            ->assertHasNoFormErrors();
 
-        $path = tempnam(sys_get_temp_dir(), 'export').'.xlsx';
-        file_put_contents($path, base64_decode($component->effects['download']['content']));
-        $rows = $this->readRows($path);
-        @unlink($path);
+        $export = Export::query()->sole();
+        $this->assertSame(UserExporter::class, $export->exporter);
+        $this->assertSame('local', $export->file_disk);
+        $this->assertSame(1, $export->successful_rows);
 
-        $this->assertSame(['Kurir Gudang'], array_column(array_slice($rows, 1), 0));
+        $rows = $this->readRows(Storage::disk('local')->path($export->getFileDirectory().'/'.$export->file_name.'.xlsx'));
+
+        $this->assertSame(['Nama', 'Username', 'Email', 'WhatsApp', 'Role', 'Kode Gudang Arsip', 'Cabang', 'Tanggal Dibuat'], $rows[0]);
+        // Hanya user hasil filter role, dan nomor WhatsApp tetap teks
+        $this->assertSame([
+            ['Kurir Satu', 'kurir_satu', 'kurir.satu@example.com', '6281200000001', 'gudang, panel_user', 'GDG-BDG-01', 'CIREBON', '01/10/2026 08:30'],
+        ], array_slice($rows, 1));
+    }
+
+    public function test_export_is_available_without_create_permission(): void
+    {
+        $this->actingAs($this->userAdmin(['ViewAny:User'], role: 'admin_viewer'));
+
+        Livewire::test(ListUsers::class)
+            ->assertActionVisible('export')
+            ->assertActionHidden('importTalentaCouriers');
     }
 
     /**
@@ -83,13 +80,19 @@ class UserExportTest extends TestCase
         return $rows;
     }
 
-    private function userAdmin(): User
+    /**
+     * @param  list<string>  $permissions
+     */
+    private function userAdmin(array $permissions, string $role = 'super_admin'): User
     {
-        $role = Role::findOrCreate('super_admin', 'web');
-        $role->givePermissionTo(Permission::findOrCreate('ViewAny:User', 'web'));
+        $adminRole = Role::findOrCreate($role, 'web');
+
+        foreach ($permissions as $permissionName) {
+            $adminRole->givePermissionTo(Permission::findOrCreate($permissionName, 'web'));
+        }
 
         $admin = User::factory()->create(['name' => 'Admin']);
-        $admin->assignRole($role);
+        $admin->assignRole($adminRole);
 
         return $admin;
     }
