@@ -23,13 +23,13 @@ class WhatsAppNotificationService
         }
     }
 
-    public function sendAccountActivated(string $target, User $user): void
+    public function sendAccountActivated(string $target, User $user, ?string $password = null): void
     {
         if (app()->environment('testing') && blank(config('services.whatsapp_gateway.url'))) {
             return;
         }
 
-        if (! $this->gateway->send($target, $this->messages->accountActivatedMessage($user))) {
+        if (! $this->gateway->send($target, $this->messages->accountActivatedMessage($user, $password))) {
             throw new RuntimeException('Gagal mengirim notifikasi WhatsApp akun aktif.');
         }
     }

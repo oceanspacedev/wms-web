@@ -18,11 +18,19 @@ class WhatsAppMessageBuilder
      * Pesan sambutan untuk user baru: nomor WhatsApp sudah bisa dipakai login aplikasi mobile, link download,
      * dan langkah login. Format tebal memakai *teks* WhatsApp; link berdiri sendiri di satu baris
      * (tanpa titik di belakang) supaya tidak ikut terbaca sebagai bagian URL.
+     * Kalau $password diisi, username dan password awal ikut dikirim sebagai cara login kedua.
      */
-    public function accountActivatedMessage(User $user): string
+    public function accountActivatedMessage(User $user, ?string $password = null): string
     {
         $appName = (string) config('services.wms_app.name', 'WMS');
         $name = filled($user->name) ? (string) $user->name : 'User';
+        $credentials = filled($password) ? [
+            'Bisa juga login dengan username dan password:',
+            'Username: *'.($user->username ?? $user->email).'*',
+            "Password: *{$password}*",
+            '_Jangan bagikan password ini kepada siapa pun._',
+            '',
+        ] : [];
 
         return implode("\n", [
             "Halo *{$name}*,",
@@ -43,6 +51,7 @@ class WhatsAppMessageBuilder
             '2. Masukkan nomor WhatsApp ini.',
             '3. Masukkan kode OTP yang dikirim ke WhatsApp Anda.',
             '',
+            ...$credentials,
             'Terima kasih.',
         ]);
     }

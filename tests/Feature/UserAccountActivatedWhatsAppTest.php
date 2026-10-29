@@ -96,6 +96,28 @@ class UserAccountActivatedWhatsAppTest extends TestCase
         });
     }
 
+    public function test_job_with_initial_password_also_sends_username_and_password(): void
+    {
+        $this->configureGateway();
+        Http::preventStrayRequests();
+        Http::fake(['https://wag.test/api/v1/messages' => Http::response(['ok' => true], 202)]);
+
+        $user = User::factory()->withUsername('dinoliardii1')->create([
+            'name' => 'Dino Liardi',
+            'whatsapp_number' => '081298765435',
+        ]);
+
+        $this->runJob($user, 'k7mp2xq9ab');
+
+        Http::assertSentCount(1);
+        Http::assertSent(function ($request): bool {
+            $text = $request['message']['text'];
+
+            return str_contains($text, '3. Masukkan kode OTP yang dikirim ke WhatsApp Anda.')
+                && str_contains($text, "Bisa juga login dengan username dan password:\nUsername: *dinoliardii1*\nPassword: *k7mp2xq9ab*\n");
+        });
+    }
+
     public function test_job_logs_and_does_not_throw_when_the_gateway_fails(): void
     {
         $this->configureGateway();
@@ -113,9 +135,9 @@ class UserAccountActivatedWhatsAppTest extends TestCase
             ->once();
     }
 
-    private function runJob(User $user): void
+    private function runJob(User $user, ?string $password = null): void
     {
-        (new SendUserAccountActivatedWhatsAppJob($user->id))->handle(app(WhatsAppNotificationService::class));
+        (new SendUserAccountActivatedWhatsAppJob($user->id, $password))->handle(app(WhatsAppNotificationService::class));
     }
 
     private function configureGateway(): void
