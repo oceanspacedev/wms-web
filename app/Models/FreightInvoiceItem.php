@@ -165,8 +165,26 @@ class FreightInvoiceItem extends Model
             'missing_rate', 'unrecognized' => 'Belum terverifikasi: tarif rute belum ada',
             'missing_weight' => 'Berat belum diisi',
             'duplicate' => 'Resi sudah pernah ditagih',
+            'matched' => $this->matchedReason($agreed),
             default => null,
         };
+    }
+
+    /**
+     * Kenapa tagihan dianggap sesuai, mis. "Sesuai kontrak: 14 kg × Rp 1.500".
+     */
+    private function matchedReason(float $agreed): string
+    {
+        // ECO/UDARA yang tarifnya belum ada di kontrak, tapi tidak lebih mahal dari DARAT rute yang sama
+        if (str_contains((string) $this->audit_notes, 'belum ada di Tarif Kontrak')) {
+            return 'Sesuai: tidak lebih mahal dari tarif DARAT';
+        }
+
+        if ((float) $this->billed_rate > 0 && (float) $this->billed_rate < $agreed - 0.5) {
+            return 'Sesuai: lebih murah dari kontrak Rp '.self::rupiah($agreed).'/kg';
+        }
+
+        return 'Sesuai kontrak: '.self::kg((float) $this->billed_weight).' kg × Rp '.self::rupiah($agreed);
     }
 
     private static function kg(float $value): string

@@ -405,7 +405,7 @@ class FreightReconciliationTest extends TestCase
             ->assertMountedActionModalSee(['Ditagih = Disetujui + Koreksi + Belum Terverifikasi', 'TARIF BELUM ADA', 'Rp 12.426.500', 'Tambah tarif / setujui manual']);
     }
 
-    public function test_each_line_that_is_not_paid_in_full_shows_a_short_reason(): void
+    public function test_each_line_shows_a_short_reason(): void
     {
         $item = fn (array $attributes): FreightInvoiceItem => new FreightInvoiceItem($attributes + ['billed_insurance' => 0]);
 
@@ -415,7 +415,46 @@ class FreightReconciliationTest extends TestCase
         $this->assertSame('Berat harusnya 10 kg', $item(['audit_status' => 'discrepancy_weight', 'billed_rate' => 1500, 'agreed_rate' => 1500, 'billed_total' => 27000, 'expected_total' => 15000])->reason());
         $this->assertSame('Belum terverifikasi: tarif rute belum ada', $item(['audit_status' => 'missing_rate', 'billed_total' => 48000, 'expected_total' => 0])->reason());
         $this->assertSame('Disetujui manual: Charter 2,5 jt', $item(['audit_status' => 'missing_rate', 'manual_approved_at' => now(), 'manual_note' => 'Charter 2,5 jt'])->reason());
-        $this->assertNull($item(['audit_status' => 'matched', 'billed_rate' => 1500, 'agreed_rate' => 1500, 'billed_total' => 15000, 'expected_total' => 15000])->reason());
+
+        // Yang sesuai juga diberi keterangan
+        $this->assertSame('Sesuai kontrak: 14 kg × Rp 1.500', $item(['audit_status' => 'matched', 'billed_weight' => 14, 'billed_rate' => 1500, 'agreed_rate' => 1500, 'billed_total' => 21000, 'expected_total' => 21000])->reason());
+        $this->assertSame('Sesuai: lebih murah dari kontrak Rp 8.000/kg', $item(['audit_status' => 'matched', 'billed_weight' => 1, 'billed_rate' => 7000, 'agreed_rate' => 8000, 'billed_total' => 7000, 'expected_total' => 7000])->reason());
+        $this->assertSame('Sesuai: tidak lebih mahal dari tarif DARAT', $item(['audit_status' => 'matched', 'billed_weight' => 10, 'billed_rate' => 2500, 'agreed_rate' => 3000, 'billed_total' => 25000, 'expected_total' => 25000, 'audit_notes' => 'Tarif ECO JAKARTA → PALEMBANG belum ada di Tarif Kontrak; tagihan tidak lebih mahal dari DARAT'])->reason());
+    }
+
+    public function test_ujung_pandang_on_the_invoice_uses_the_makassar_contract_rate(): void
+    {
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-UPG-001',
+            'invoice_date' => now(),
+            'origin_city' => 'JAKARTA',
+            'status' => 'processing',
+        ]);
+        ExpeditionRateCard::create([
+            'expedition_id' => $this->expedition->id,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'MAKASSAR',
+            'destination_district' => 'MAKASSAR',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 7000,
+            'min_kg' => 50,
+            'is_active' => true,
+        ]);
+
+        $result = (new FreightReconciliationService)->reconcile($invoice, [[
+            'no_resi_awb' => '100239896516',
+            'destination_city' => 'UJUNG PANDANG',
+            'service_type' => 'DARAT',
+            'billed_weight' => 30.0,
+            'billed_rate' => 7000.0,
+            'billed_total' => 210000.0,
+        ]]);
+
+        $item = $result->items->sole();
+        $this->assertSame('matched', $item->audit_status);
+        $this->assertEquals(7000, $item->agreed_rate);
+        $this->assertSame('Sesuai kontrak: 30 kg × Rp 7.000', $item->reason());
     }
 
     /**

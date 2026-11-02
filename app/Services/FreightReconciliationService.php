@@ -20,6 +20,9 @@ class FreightReconciliationService
         'JOGYAKARTA' => 'YOGYAKARTA',
         'JOGJAKARTA' => 'YOGYAKARTA',
         'JOGJA' => 'YOGYAKARTA',
+        // Nama lama Makassar yang masih dipakai invoice 21 Express
+        'UJUNG PANDANG' => 'MAKASSAR',
+        'UJUNGPANDANG' => 'MAKASSAR',
     ];
 
     public function __construct(private XlsxReader $reader = new XlsxReader) {}

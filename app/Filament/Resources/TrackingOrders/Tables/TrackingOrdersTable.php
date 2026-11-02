@@ -7,10 +7,13 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class TrackingOrdersTable
 {
@@ -94,6 +97,24 @@ class TrackingOrdersTable
                 SelectFilter::make('nama_pengirim')
                     ->label('Filter Driver / Pengirim')
                     ->options(fn () => TrackingOrderResource::getEloquentQuery()->whereNotNull('nama_pengirim')->where('nama_pengirim', '!=', '')->distinct()->pluck('nama_pengirim', 'nama_pengirim')->toArray()),
+
+                // Untuk export per periode
+                Filter::make('periode')
+                    ->label('Periode Tanggal Pengiriman')
+                    ->schema([
+                        DatePicker::make('dari')->label('Tanggal pengiriman dari'),
+                        DatePicker::make('sampai')->label('Sampai'),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => $query
+                        ->when($data['dari'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('tanggal_pengiriman', '>=', $date))
+                        ->when($data['sampai'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('tanggal_pengiriman', '<=', $date)))
+                    ->indicateUsing(function (array $data): ?string {
+                        if (blank($data['dari'] ?? null) && blank($data['sampai'] ?? null)) {
+                            return null;
+                        }
+
+                        return 'Pengiriman: '.($data['dari'] ?? '…').' s/d '.($data['sampai'] ?? '…');
+                    }),
             ])
             ->recordActions([
                 ViewAction::make(),
