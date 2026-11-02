@@ -223,6 +223,7 @@ Melalui **Filament Shield**, akses fitur dibagi secara hierarkis:
    ```bash
    git clone https://github.com/oceanspacedev/wms-web.git
    cd wms-web
+   git switch staging
    ```
 
 2. **Install dependensi PHP & JavaScript:**
@@ -276,6 +277,24 @@ Melalui **Filament Shield**, akses fitur dibagi secara hierarkis:
    * **Admin Panel:** [http://localhost:8000/admin](http://localhost:8000/admin)
    * **Laravel Horizon:** [http://localhost:8000/horizon](http://localhost:8000/horizon)
    * **Log Viewer:** [http://localhost:8000/log-viewer](http://localhost:8000/log-viewer)
+
+---
+
+## 🌿 Workflow Development
+
+Konvensi branch (sama seperti dnd-web dan helpdesk-web):
+
+- `staging`: branch integrasi. Semua perubahan masuk ke sini dulu dan diuji di staging.
+- `main`: branch release untuk production. `main` diproteksi: tidak menerima push langsung, dan hanya menerima pull request **dari `staging`** (check GitHub Actions `PR dari staging` di [`.github/workflows/pr-to-main.yml`](.github/workflows/pr-to-main.yml) wajib hijau, berlaku juga untuk admin). Tidak ada perubahan yang masuk `main` tanpa lewat staging dulu.
+- Branch pekerjaan: buat dari `staging` dengan pola `feat/<scope>`, `fix/<scope>`, atau `docs/<scope>`; PR ke `staging`, bukan ke `main`.
+
+Alurnya: branch pekerjaan → PR ke `staging` → uji di staging → PR `staging` → `main`.
+
+```bash
+git switch staging
+git pull --ff-only origin staging
+git switch -c feat/<nama-fitur>
+```
 
 ---
 
