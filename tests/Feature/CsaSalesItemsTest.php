@@ -90,7 +90,9 @@ class CsaSalesItemsTest extends TestCase
         $component = Livewire::test(ItemsRelationManager::class, ['ownerRecord' => $import, 'pageClass' => ViewCsaImport::class])
             ->assertCanSeeTableRecords([$unit])
             ->assertCanNotSeeTableRecords([$cable])
-            ->assertSee(['SEMARANG', 'GMSMG', 'CAMON 50 CN5 8/128', 'NEBULA TITANIUM']);
+            ->assertSee(['SEMARANG', 'TECNO CAMON 50 CN5 8/128', 'NEBULA TITANIUM'])
+            // Total tiap gudang di judul grupnya (kabel di Semarang tidak ikut karena filter HP & tablet)
+            ->assertSee(['GMBDG · 5 unit · Rp 15 jt', 'GMSMG · 1 unit · Rp 3 jt']);
 
         // Gudang yang paling banyak terjual tampil paling atas
         $this->assertSame(['GMBDG', 'GMSMG'], $component->instance()->getTableRecords()->pluck('kode_gudang')->all());
