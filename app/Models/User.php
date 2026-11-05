@@ -12,13 +12,14 @@ use Filament\Models\Contracts\HasAvatar;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
-#[Fillable(['name', 'username', 'email', 'email_verified_at', 'password', 'whatsapp_number', 'whatsapp_verified_at', 'avatar_url', 'kode_gudang_arsip', 'cabang'])]
+#[Fillable(['name', 'username', 'email', 'email_verified_at', 'password', 'whatsapp_number', 'whatsapp_verified_at', 'avatar_url', 'kode_gudang_arsip', 'cabang', 'depo_id'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser, HasAvatar
 {
@@ -61,6 +62,23 @@ class User extends Authenticatable implements FilamentUser, HasAvatar
                 $user->whatsapp_verified_at = $user->email_verified_at;
             }
         });
+
+        // Depo baru diisi: SJ lama kurir ini yang belum punya depo ikut diberi depo tersebut
+        static::saved(function (User $user): void {
+            if ($user->wasChanged('depo_id') && $user->depo_id !== null) {
+                TrackingOrder::query()->where('user_id', $user->id)->whereNull('depo_id')->update(['depo_id' => $user->depo_id]);
+            }
+        });
+    }
+
+    /**
+     * Depo tempat kurir/admin ini bekerja (Master Depo).
+     *
+     * @return BelongsTo<Depo, $this>
+     */
+    public function depo(): BelongsTo
+    {
+        return $this->belongsTo(Depo::class);
     }
 
     /**
@@ -74,6 +92,7 @@ class User extends Authenticatable implements FilamentUser, HasAvatar
             'email_verified_at' => 'datetime',
             'whatsapp_verified_at' => 'datetime',
             'password' => 'hashed',
+            'depo_id' => 'integer',
         ];
     }
 

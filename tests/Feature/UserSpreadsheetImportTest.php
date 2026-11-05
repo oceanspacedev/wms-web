@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\Pages\ListUsers;
 use App\Jobs\SendUserAccountActivatedWhatsAppJob;
+use App\Models\Depo;
 use App\Models\User;
 use App\Services\UserSpreadsheetImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -85,6 +86,38 @@ class UserSpreadsheetImportTest extends TestCase
         $this->assertSame(['Kurir Lama'], $result['existing']);
         $this->assertSame(['Baris 3', 'Nomor Pendek'], $result['incomplete']);
         Queue::assertNothingPushed();
+    }
+
+    public function test_depo_column_sets_the_depo_of_new_and_existing_accounts(): void
+    {
+        Queue::fake();
+        $palembang = Depo::factory()->create(['kode' => 'GMPLB', 'nama' => 'PALEMBANG']);
+        $jakarta = Depo::factory()->create(['kode' => 'GMJKT', 'nama' => 'JAKARTA']);
+        $existing = User::factory()->withVerifiedWhatsApp('6281200000003')->create(['name' => 'Kurir Lama']);
+        $sameDepo = User::factory()->withVerifiedWhatsApp('6281200000004')->create(['name' => 'Admin Jakarta', 'depo_id' => $jakarta->id]);
+
+        $result = app(UserSpreadsheetImporter::class)->import($this->spreadsheet([
+            UserSpreadsheetImporter::HEADERS,
+            // Depo boleh nama (beda huruf besar/kecil) atau kode
+            ['Cepra', '081200000001', 'palembang'],
+            ['Rachmat', '081200000002', 'GMJKT'],
+            ['Kurir Lama', '081200000003', 'Palembang'],
+            ['Admin Jakarta', '081200000004', 'Jakarta'],
+            ['Tanpa Depo', '081200000005', ''],
+            ['Depo Salah', '081200000006', 'Atlantis'],
+        ]), sendWhatsApp: false);
+
+        $this->assertSame(['Cepra', 'Rachmat', 'Tanpa Depo'], $result['created']);
+        $this->assertSame(['Kurir Lama'], $result['depo_updated']);
+        $this->assertSame(['Admin Jakarta'], $result['existing']);
+        $this->assertSame(['Depo Salah (Atlantis)'], $result['unknown_depo']);
+
+        $this->assertSame($palembang->id, User::query()->where('whatsapp_number', '6281200000001')->value('depo_id'));
+        $this->assertSame($jakarta->id, User::query()->where('whatsapp_number', '6281200000002')->value('depo_id'));
+        $this->assertNull(User::query()->where('whatsapp_number', '6281200000005')->value('depo_id'));
+        $this->assertSame($palembang->id, $existing->refresh()->depo_id);
+        $this->assertSame($jakarta->id, $sameDepo->refresh()->depo_id);
+        $this->assertFalse(User::query()->where('whatsapp_number', '6281200000006')->exists());
     }
 
     public function test_username_gets_a_suffix_when_already_taken(): void

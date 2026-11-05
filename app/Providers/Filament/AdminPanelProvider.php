@@ -63,6 +63,7 @@ class AdminPanelProvider extends PanelProvider
                 'Tracking Order',
                 'Ekspedisi',
                 'Audit',
+                'Master Data',
                 'Filament Shield',
                 'Developer & Tools',
             ])

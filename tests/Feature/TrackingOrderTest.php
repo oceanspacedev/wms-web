@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Filament\Resources\TrackingOrders\Pages\CreateTrackingOrder;
 use App\Filament\Resources\TrackingOrders\Pages\ListTrackingOrders;
+use App\Models\Depo;
 use App\Models\TrackingOrder;
 use App\Models\User;
 use App\Services\TrackingOrderExporter;
@@ -99,6 +100,8 @@ class TrackingOrderTest extends TestCase
         Storage::disk('public')->putFileAs('tracking-orders/nota', UploadedFile::fake()->image('nota.jpg', 1200, 900), 'sj-okt.jpg');
 
         $courier = $this->courierWithPanelAccess();
+        $bandung = Depo::factory()->create(['kode' => 'GMBDG', 'nama' => 'BANDUNG']);
+        $courier->update(['depo_id' => $bandung->id]);
         $october = TrackingOrder::create([
             'no_sj' => '2610000123', 'nama_dealer' => 'Toko Oktober', 'jumlah_value_nota' => 1500000,
             'tanggal_pengiriman' => '2026-10-15', 'nama_pengirim' => 'Andi', 'nama_penerima' => 'Imas', 'user_id' => $courier->id,
@@ -115,7 +118,9 @@ class TrackingOrderTest extends TestCase
 
         Livewire::test(ListTrackingOrders::class)
             ->filterTable('periode', ['dari' => '2026-10-01', 'sampai' => '2026-10-31'])
+            ->filterTable('depo', $bandung->id)
             ->assertCanSeeTableRecords([$october])
+            ->assertSee('BANDUNG')
             ->callAction('export')
             ->assertNotified('Export dimulai');
 
@@ -127,17 +132,19 @@ class TrackingOrderTest extends TestCase
         Storage::disk('local')->assertExists($file);
 
         $sheet = IOFactory::load(Storage::disk('local')->path($file))->getActiveSheet();
-        $this->assertSame(TrackingOrderExporter::HEADERS, $sheet->rangeToArray('A1:P1')[0]);
+        $this->assertSame(TrackingOrderExporter::HEADERS, $sheet->rangeToArray('A1:Q1')[0]);
         $this->assertSame(3, $sheet->getHighestRow());
         $this->assertSame('2610000123', $sheet->getCell('B2')->getValue());
         $this->assertEquals(1500000, $sheet->getCell('E2')->getValue());
-        $this->assertSame('Imas', $sheet->getCell('H2')->getValue());
+        // Depo otomatis dari akun kurir
+        $this->assertSame('BANDUNG', $sheet->getCell('H2')->getValue());
+        $this->assertSame('Imas', $sheet->getCell('I2')->getValue());
         // Foto nota tertempel di kolom FOTO NOTA; foto penerima yang filenya hilang diberi keterangan
-        $this->assertSame(['I2'], array_map(fn ($drawing): string => $drawing->getCoordinates(), iterator_to_array($sheet->getDrawingCollection())));
-        $this->assertSame('Foto tidak ditemukan', $sheet->getCell('J2')->getValue());
-        $this->assertSame('Format foto tidak didukung', $sheet->getCell('I3')->getValue());
-        $this->assertSame('-', $sheet->getCell('J3')->getValue());
-        $this->assertStringEndsWith("/admin/tracking-orders/{$october->id}", $sheet->getCell('P2')->getHyperlink()->getUrl());
+        $this->assertSame(['J2'], array_map(fn ($drawing): string => $drawing->getCoordinates(), iterator_to_array($sheet->getDrawingCollection())));
+        $this->assertSame('Foto tidak ditemukan', $sheet->getCell('K2')->getValue());
+        $this->assertSame('Format foto tidak didukung', $sheet->getCell('J3')->getValue());
+        $this->assertSame('-', $sheet->getCell('K3')->getValue());
+        $this->assertStringEndsWith("/admin/tracking-orders/{$october->id}", $sheet->getCell('Q2')->getHyperlink()->getUrl());
 
         $notification = $courier->notifications()->sole();
         $this->assertSame('Export Surat Jalan selesai', $notification->data['title']);

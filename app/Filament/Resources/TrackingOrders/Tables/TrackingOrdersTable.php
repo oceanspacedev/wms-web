@@ -63,6 +63,12 @@ class TrackingOrdersTable
                     ->searchable()
                     ->placeholder('-'),
 
+                // Otomatis dari depo akun kurir saat SJ dicatat
+                TextColumn::make('depo.nama')
+                    ->label('Depo')
+                    ->placeholder('-')
+                    ->sortable(),
+
                 TextColumn::make('nama_penerima')
                     ->label('Nama Penerima')
                     ->searchable()
@@ -97,6 +103,12 @@ class TrackingOrdersTable
                 SelectFilter::make('nama_pengirim')
                     ->label('Filter Driver / Pengirim')
                     ->options(fn () => TrackingOrderResource::getEloquentQuery()->whereNotNull('nama_pengirim')->where('nama_pengirim', '!=', '')->distinct()->pluck('nama_pengirim', 'nama_pengirim')->toArray()),
+
+                SelectFilter::make('depo')
+                    ->label('Depo')
+                    ->relationship('depo', 'nama')
+                    ->searchable()
+                    ->preload(),
 
                 // Untuk export per periode
                 Filter::make('periode')

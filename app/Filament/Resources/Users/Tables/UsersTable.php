@@ -43,6 +43,11 @@ class UsersTable
                     ->badge()
                     ->color('primary')
                     ->searchable(),
+                TextColumn::make('depo.nama')
+                    ->label('Depo')
+                    ->placeholder('-')
+                    ->sortable()
+                    ->toggleable(),
                 TextColumn::make('email_verified_at')
                     ->dateTime()
                     ->sortable()
@@ -59,6 +64,11 @@ class UsersTable
             ->filters([
                 SelectFilter::make('roles')
                     ->relationship('roles', 'name')
+                    ->preload(),
+                SelectFilter::make('depo')
+                    ->label('Depo')
+                    ->relationship('depo', 'nama')
+                    ->searchable()
                     ->preload(),
             ])
             ->recordActions([
