@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Jobs\SendUserAccountActivatedWhatsAppJob;
+use App\Models\Depo;
 use App\Models\User;
 use App\Support\WhatsAppNumber;
 use Illuminate\Support\Facades\DB;
@@ -17,8 +18,9 @@ use RuntimeException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Buat akun aplikasi WMS dari template Excel yang cukup berisi nama lengkap dan nomor WhatsApp.
+ * Buat akun aplikasi WMS dari template Excel yang cukup berisi nama lengkap dan nomor WhatsApp, plus depo (opsional).
  * Email dibiarkan kosong; username dibuat dari nama, dan password awal hanya dikirim ke WhatsApp.
+ * Akun yang nomor WhatsApp-nya sudah terdaftar tidak dibuat ulang, hanya depo-nya yang diperbarui.
  */
 class UserSpreadsheetImporter
 {
@@ -27,7 +29,7 @@ class UserSpreadsheetImporter
      *
      * @var list<string>
      */
-    public const HEADERS = ['Nama Lengkap*', 'Nomor WhatsApp*'];
+    public const HEADERS = ['Nama Lengkap*', 'Nomor WhatsApp*', 'Depo'];
 
     public function __construct(private ImportedAccountCreator $accounts) {}
 
@@ -39,6 +41,7 @@ class UserSpreadsheetImporter
         return response()->streamDownload(function (): void {
             $options = new Options;
             $options->setColumnWidth(35, 1, 2);
+            $options->setColumnWidth(20, 3);
 
             $writer = new Writer($options);
             $writer->openToFile('php://output');
@@ -51,19 +54,19 @@ class UserSpreadsheetImporter
 
     /**
      * Semua akun dibuat dalam satu transaksi: kalau gagal di tengah jalan, tidak ada akun yang tersimpan.
-     * Nomor WhatsApp yang sudah dipakai akun lain dilewati, jadi file yang sama aman diimpor ulang.
+     * Nomor WhatsApp yang sudah dipakai akun lain tidak dibuat ulang (hanya depo-nya diperbarui), jadi file yang sama aman diimpor ulang.
      *
-     * @return array{created: list<string>, existing: list<string>, incomplete: list<string>}
+     * @return array{created: list<string>, existing: list<string>, incomplete: list<string>, depo_updated: list<string>, unknown_depo: list<string>}
      */
     public function import(string $path, bool $sendWhatsApp = true): array
     {
         $rows = $this->rows($path);
 
         return DB::transaction(function () use ($rows, $sendWhatsApp): array {
-            $result = ['created' => [], 'existing' => [], 'incomplete' => []];
+            $result = ['created' => [], 'existing' => [], 'incomplete' => [], 'depo_updated' => [], 'unknown_depo' => []];
             $messages = [];
 
-            foreach ($rows as $rowNumber => [$name, $whatsApp]) {
+            foreach ($rows as $rowNumber => [$name, $whatsApp, $depoText]) {
                 $whatsAppNumber = WhatsAppNumber::normalize($whatsApp);
 
                 if ($name === '' || ! WhatsAppNumber::isValid($whatsAppNumber)) {
@@ -72,13 +75,29 @@ class UserSpreadsheetImporter
                     continue;
                 }
 
-                if (User::query()->where('whatsapp_number', $whatsAppNumber)->exists()) {
-                    $result['existing'][] = $name;
+                // Depo diketik nama atau kode (Palembang / GMPLB); yang tidak ada di Master Depo dilewati
+                $depo = Depo::findByText($depoText);
+
+                if ($depoText !== '' && $depo === null) {
+                    $result['unknown_depo'][] = "{$name} ({$depoText})";
 
                     continue;
                 }
 
-                $messages[] = $this->accounts->create($name, $whatsAppNumber, null, $name, 'user');
+                $user = User::query()->where('whatsapp_number', $whatsAppNumber)->first();
+
+                if ($user !== null) {
+                    if ($depo !== null && $user->depo_id !== $depo->id) {
+                        $user->update(['depo_id' => $depo->id]);
+                        $result['depo_updated'][] = $name;
+                    } else {
+                        $result['existing'][] = $name;
+                    }
+
+                    continue;
+                }
+
+                $messages[] = $this->accounts->create($name, $whatsAppNumber, null, $name, 'user', $depo?->id);
 
                 $result['created'][] = $name;
             }
@@ -92,9 +111,9 @@ class UserSpreadsheetImporter
     }
 
     /**
-     * Nama & nomor WhatsApp per baris sheet pertama, dengan nomor baris Excel sebagai key. Baris kosong dilewati.
+     * Nama, nomor WhatsApp & depo per baris sheet pertama, dengan nomor baris Excel sebagai key. Baris kosong dilewati.
      *
-     * @return array<int, array{string, string}>
+     * @return array<int, array{string, string, string}>
      */
     private function rows(string $path): array
     {
@@ -119,7 +138,7 @@ class UserSpreadsheetImporter
 
     /**
      * @param  iterable<int, Row>  $sheetRows
-     * @return array<int, array{string, string}>
+     * @return array<int, array{string, string, string}>
      */
     private function sheetRows(iterable $sheetRows): array
     {
@@ -139,14 +158,19 @@ class UserSpreadsheetImporter
                     throw new RuntimeException('Kolom "Nama Lengkap" dan "Nomor WhatsApp" tidak ditemukan di baris pertama. Gunakan template import pengguna.');
                 }
 
-                $columns = [$name, $whatsApp];
+                // Kolom Depo boleh tidak ada (template lama)
+                $columns = [$name, $whatsApp, array_search('depo', $headers, true)];
 
                 continue;
             }
 
-            $values = [Str::squish($cells[$columns[0]] ?? ''), $cells[$columns[1]] ?? ''];
+            $values = [
+                Str::squish($cells[$columns[0]] ?? ''),
+                $cells[$columns[1]] ?? '',
+                $columns[2] === false ? '' : Str::squish($cells[$columns[2]] ?? ''),
+            ];
 
-            if ($values !== ['', '']) {
+            if ($values !== ['', '', '']) {
                 $rows[$rowNumber] = $values;
             }
         }

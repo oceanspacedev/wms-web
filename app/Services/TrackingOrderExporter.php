@@ -28,14 +28,14 @@ class TrackingOrderExporter
      */
     public const HEADERS = [
         'TANGGAL PENGIRIMAN', 'NOMOR SJ', 'NAMA DEALER', 'ALAMAT DEALER', 'JUMLAH VALUE NOTA', 'TANGGAL NOTA',
-        'NAMA PENGIRIM', 'NAMA PENERIMA', 'FOTO NOTA', 'FOTO PENERIMA', 'LOKASI PENERIMAAN', 'LATITUDE', 'LONGITUDE',
+        'NAMA PENGIRIM', 'DEPO', 'NAMA PENERIMA', 'FOTO NOTA', 'FOTO PENERIMA', 'LOKASI PENERIMAAN', 'LATITUDE', 'LONGITUDE',
         'CATATAN', 'DICATAT', 'DETAIL',
     ];
 
     /** Kolom foto: [huruf kolom => [atribut, folder lama]]. */
     private const PHOTO_COLUMNS = [
-        'I' => ['foto_nota_sj', 'tracking-orders/nota'],
-        'J' => ['foto_penerima', 'tracking-orders/penerima'],
+        'J' => ['foto_nota_sj', 'tracking-orders/nota'],
+        'K' => ['foto_penerima', 'tracking-orders/penerima'],
     ];
 
     /** Sisi terpanjang foto di Excel (piksel). */
@@ -73,11 +73,11 @@ class TrackingOrderExporter
     private function writeHeader(Worksheet $sheet): void
     {
         $sheet->fromArray(self::HEADERS, null, 'A1');
-        $sheet->getStyle('A1:P1')->getFont()->setBold(true);
-        $sheet->getStyle('A1:P1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('B7E1CD');
+        $sheet->getStyle('A1:Q1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:Q1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('B7E1CD');
         $sheet->freezePane('C2');
 
-        foreach (['A' => 14, 'B' => 16, 'C' => 26, 'D' => 34, 'E' => 16, 'F' => 13, 'G' => 18, 'H' => 18, 'I' => 24, 'J' => 24, 'K' => 34, 'L' => 11, 'M' => 11, 'N' => 24, 'O' => 16, 'P' => 12] as $column => $width) {
+        foreach (['A' => 14, 'B' => 16, 'C' => 26, 'D' => 34, 'E' => 16, 'F' => 13, 'G' => 18, 'H' => 14, 'I' => 18, 'J' => 24, 'K' => 24, 'L' => 34, 'M' => 11, 'N' => 11, 'O' => 24, 'P' => 16, 'Q' => 12] as $column => $width) {
             $sheet->getColumnDimension($column)->setWidth($width);
         }
     }
@@ -92,6 +92,7 @@ class TrackingOrderExporter
             $order->jumlah_value_nota !== null ? (float) $order->jumlah_value_nota : null,
             $this->date($order->tanggal_nota),
             $order->nama_pengirim,
+            $order->depo?->nama,
             $order->nama_penerima,
             null,
             null,
@@ -107,12 +108,12 @@ class TrackingOrderExporter
         $sheet->setCellValueExplicit('B'.$row, (string) $order->no_sj, DataType::TYPE_STRING);
         $sheet->getStyle("A{$row}")->getNumberFormat()->setFormatCode('dd/mm/yyyy');
         $sheet->getStyle("F{$row}")->getNumberFormat()->setFormatCode('dd/mm/yyyy');
-        $sheet->getStyle("O{$row}")->getNumberFormat()->setFormatCode('dd/mm/yyyy hh:mm');
+        $sheet->getStyle("P{$row}")->getNumberFormat()->setFormatCode('dd/mm/yyyy hh:mm');
         $sheet->getStyle("E{$row}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet->getStyle("A{$row}:P{$row}")->getAlignment()->setVertical(Alignment::VERTICAL_TOP)->setWrapText(true);
+        $sheet->getStyle("A{$row}:Q{$row}")->getAlignment()->setVertical(Alignment::VERTICAL_TOP)->setWrapText(true);
 
-        $sheet->getCell("P{$row}")->getHyperlink()->setUrl(TrackingOrderResource::getUrl('view', ['record' => $order]));
-        $sheet->getStyle("P{$row}")->getFont()->setUnderline(true)->getColor()->setRGB('0563C1');
+        $sheet->getCell("Q{$row}")->getHyperlink()->setUrl(TrackingOrderResource::getUrl('view', ['record' => $order]));
+        $sheet->getStyle("Q{$row}")->getFont()->setUnderline(true)->getColor()->setRGB('0563C1');
 
         $hasPhoto = false;
 

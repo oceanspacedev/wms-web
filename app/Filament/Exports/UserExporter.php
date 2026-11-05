@@ -34,6 +34,8 @@ class UserExporter extends Exporter
                 ->label('Kode Gudang Arsip'),
             ExportColumn::make('cabang')
                 ->label('Cabang'),
+            ExportColumn::make('depo.nama')
+                ->label('Depo'),
             ExportColumn::make('created_at')
                 ->label('Tanggal Dibuat')
                 ->formatStateUsing(fn (?CarbonInterface $state): ?string => $state?->format('d/m/Y H:i')),

@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TrackingOrder extends Model
 {
@@ -26,6 +27,7 @@ class TrackingOrder extends Model
         'tanggal_nota',
         'tanggal_pengiriman',
         'nama_pengirim',
+        'depo_id',
         'nama_penerima',
         'foto_nota_sj',
         'foto_penerima',
@@ -34,6 +36,26 @@ class TrackingOrder extends Model
         'longitude',
         'notes',
     ];
+
+    protected static function booted(): void
+    {
+        // Depo otomatis dari akun kurir yang mencatat SJ (dari aplikasi maupun panel)
+        static::creating(function (TrackingOrder $order): void {
+            if ($order->depo_id === null && $order->user_id !== null) {
+                $order->depo_id = User::query()->whereKey($order->user_id)->value('depo_id');
+            }
+        });
+    }
+
+    /**
+     * Depo kurir saat SJ dicatat.
+     *
+     * @return BelongsTo<Depo, $this>
+     */
+    public function depo(): BelongsTo
+    {
+        return $this->belongsTo(Depo::class);
+    }
 
     /**
      * Get the attributes that should be cast.
@@ -44,6 +66,7 @@ class TrackingOrder extends Model
     {
         return [
             'user_id' => 'integer',
+            'depo_id' => 'integer',
             'tanggal_nota' => 'date',
             'tanggal_pengiriman' => 'date',
             'jumlah_value_nota' => 'decimal:2',

@@ -39,6 +39,10 @@ class TrackingOrderResource extends JsonResource
             'tanggal_pengiriman' => $this->tanggal_pengiriman?->format('Y-m-d'),
             /** Nama kurir / pengirim. @var string|null */
             'nama_pengirim' => $this->nama_pengirim,
+            /** Kode gudang depo kurir saat SJ dicatat, mis. GMPLB. @var string|null */
+            'depo' => $this->depo?->kode,
+            /** Nama depo, mis. PALEMBANG. @var string|null */
+            'depo_nama' => $this->depo?->nama,
             /** Nama penerima di toko. @var string|null */
             'nama_penerima' => $this->nama_penerima,
             /** URL foto nota SJ. @var string|null */
