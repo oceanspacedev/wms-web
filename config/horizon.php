@@ -226,6 +226,13 @@ return [
                 'maxProcesses' => 3,
             ],
         ],
+
+        // Environment lain (mis. APP_ENV=staging): tanpa ini Horizon jalan tanpa worker dan job hanya menunggu di antrean
+        '*' => [
+            'supervisor-1' => [
+                'maxProcesses' => 3,
+            ],
+        ],
     ],
 
     /*

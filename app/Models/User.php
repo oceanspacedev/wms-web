@@ -20,7 +20,7 @@ use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
 #[Fillable(['name', 'username', 'email', 'email_verified_at', 'password', 'whatsapp_number', 'whatsapp_verified_at', 'avatar_url', 'kode_gudang_arsip', 'cabang', 'depo_id'])]
-#[Hidden(['password', 'remember_token'])]
+#[Hidden(['password', 'remember_token', 'telegram_chat_id'])]
 class User extends Authenticatable implements FilamentUser, HasAvatar
 {
     /** @use HasFactory<UserFactory> */
@@ -93,6 +93,7 @@ class User extends Authenticatable implements FilamentUser, HasAvatar
             'whatsapp_verified_at' => 'datetime',
             'password' => 'hashed',
             'depo_id' => 'integer',
+            'telegram_chat_id' => 'integer',
         ];
     }
 
