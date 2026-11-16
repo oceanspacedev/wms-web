@@ -65,6 +65,10 @@ return [
         'bot_token' => env('TELEGRAM_BOT_TOKEN'),
         'bot_username' => env('TELEGRAM_BOT_USERNAME'),
         'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
+        // Awalan kode hubungkan akun (t.me/bot?start=wms_KODE) supaya bot gabungan tahu link itu milik WMS
+        'start_prefix' => env('TELEGRAM_START_PREFIX', 'wms_'),
+        // Token untuk bot gabungan (web lain pemilik bot) yang meneruskan pesan WMS ke /api/telegram-bridge
+        'bridge_token' => env('TELEGRAM_BRIDGE_TOKEN'),
     ],
 
     // AI (API kompatibel OpenAI) untuk menjawab pertanyaan bebas di bot Telegram; kosong = bot pakai perintah kata kunci saja

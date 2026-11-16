@@ -127,7 +127,18 @@ class UserSpreadsheetImporter
 
         try {
             foreach ($reader->getSheetIterator() as $sheet) {
-                return $this->sheetRows($sheet->getRowIterator());
+                $rowIterator = $sheet->getRowIterator();
+
+                try {
+                    return $this->sheetRows($rowIterator);
+                } finally {
+                    try {
+                        while ($rowIterator->valid()) {
+                            $rowIterator->next();
+                        }
+                    } catch (Throwable) {
+                    }
+                }
             }
         } finally {
             $reader->close();

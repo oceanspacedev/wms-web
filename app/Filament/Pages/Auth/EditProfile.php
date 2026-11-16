@@ -94,7 +94,7 @@ class EditProfile extends MekayaEditProfile
 
     private function telegramInstructions(): HtmlString
     {
-        $code = e((string) $this->telegramLinkCode);
+        $code = e(TelegramBot::startParameter((string) $this->telegramLinkCode));
         $bot = ltrim((string) config('services.telegram.bot_username'), '@');
         $botLabel = $bot !== '' ? '<b>@'.e($bot).'</b>' : 'bot Telegram WMS';
 
