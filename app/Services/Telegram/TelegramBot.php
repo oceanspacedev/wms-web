@@ -53,12 +53,26 @@ class TelegramBot
 
     /**
      * Link yang langsung membuka bot dan mengirim kodenya (null kalau username bot belum diisi).
+     * Kode diberi awalan WMS (mis. "wms_KODE") supaya bot gabungan bisa meneruskannya ke WMS.
      */
     public static function linkUrl(string $code): ?string
     {
         $bot = ltrim((string) config('services.telegram.bot_username'), '@');
 
-        return $bot === '' ? null : "https://t.me/{$bot}?start={$code}";
+        return $bot === '' ? null : "https://t.me/{$bot}?start=".self::startParameter($code);
+    }
+
+    /**
+     * Teks setelah "/start": awalan WMS + kode.
+     */
+    public static function startParameter(string $code): string
+    {
+        return config('services.telegram.start_prefix', 'wms_').$code;
+    }
+
+    public function isLinked(int $chatId): bool
+    {
+        return User::query()->where('telegram_chat_id', $chatId)->exists();
     }
 
     /**
@@ -91,14 +105,17 @@ class TelegramBot
         // "/sj@nama_bot hari ini" → "sj hari ini"
         $command = Str::lower(Str::squish((string) preg_replace('/^\/(\w+)(@\w+)?/u', '$1', $text)));
 
-        if (preg_match('/^start\s+([a-z0-9]+)$/i', $command, $match) === 1) {
+        // "/start wms_KODE" (atau "/start KODE" tanpa awalan)
+        $prefix = preg_quote(Str::lower((string) config('services.telegram.start_prefix', 'wms_')), '/');
+
+        if (preg_match('/^start\s+(?:'.$prefix.')?([a-z0-9]+)$/i', $command, $match) === 1) {
             return $this->link($chatId, Str::upper($match[1]));
         }
 
         $user = User::query()->where('telegram_chat_id', $chatId)->first();
 
         if ($user === null) {
-            return "Chat ini belum terhubung ke akun WMS.\n\nBuka WMS → klik foto profil → <b>Profil</b> → <b>Hubungkan Telegram</b>, lalu ikuti petunjuknya.";
+            return $this->notLinkedMessage();
         }
 
         return match (true) {
@@ -133,6 +150,21 @@ class TelegramBot
             (bool) preg_match('/\b(sj|surat jalan|nota)\b/', $command) => $this->suratJalan($user, $command),
             default => 'Maaf, saya belum paham. Ketik <b>bantuan</b> untuk contoh pertanyaan.',
         };
+    }
+
+    /**
+     * Ajakan login WMS untuk chat yang belum terhubung; jelas menyebut WMS karena bot bisa dipakai bersama sistem lain.
+     */
+    private function notLinkedMessage(): string
+    {
+        $profile = e(url('/admin/profile'));
+
+        return "🔒 <b>Fitur WMS perlu login dulu.</b>\n\n"
+            ."Akun Telegram ini belum terhubung ke akun WMS. Caranya (cukup sekali):\n"
+            ."1. Login WMS lalu buka halaman Profil: <a href=\"{$profile}\">{$profile}</a>\n"
+            ."2. Klik <b>Hubungkan Telegram</b> → <b>Buka Telegram</b>\n"
+            ."3. Tekan <b>Start</b> di chat ini\n\n"
+            .'Belum punya akun WMS? Hubungi admin WMS.';
     }
 
     private function link(int $chatId, string $code): string

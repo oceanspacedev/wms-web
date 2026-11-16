@@ -13,6 +13,7 @@ use App\Services\Telegram\WmsDataTools;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Testing\TestResponse;
 use Livewire\Livewire;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -54,13 +55,14 @@ class TelegramBotTest extends TestCase
     {
         $user = User::factory()->create(['name' => 'Reza']);
         $code = TelegramBot::issueLinkCode($user);
-        $this->assertSame("https://t.me/wms_tes_bot?start={$code}", TelegramBot::linkUrl($code));
+        // Kode diberi awalan wms_ supaya bot gabungan tahu link itu milik WMS
+        $this->assertSame("https://t.me/wms_tes_bot?start=wms_{$code}", TelegramBot::linkUrl($code));
 
         // Chat yang belum terhubung tidak mendapat data
         $this->webhook('sj hari ini');
         $this->assertSentText('belum terhubung');
 
-        $this->webhook("/start {$code}");
+        $this->webhook("/start wms_{$code}");
         $this->assertSame(self::CHAT_ID, $user->refresh()->telegram_chat_id);
         $this->assertSentText('Terhubung ke akun WMS <b>Reza</b>');
 
@@ -69,6 +71,36 @@ class TelegramBotTest extends TestCase
 
         $this->assertStringContainsString('sudah diputus', $this->bot()->reply(self::CHAT_ID, 'putuskan'));
         $this->assertNull($user->refresh()->telegram_chat_id);
+    }
+
+    public function test_shared_bot_forwards_wms_messages_through_the_bridge_and_must_link_first(): void
+    {
+        config(['services.telegram.bridge_token' => 'jembatan-tes']);
+        $this->configureAi();
+        $user = User::factory()->create(['name' => 'Reza']);
+        $this->order('SJ-1', $user);
+
+        // Tanpa token yang benar ditolak
+        $this->postJson('/api/telegram-bridge', ['chat_id' => self::CHAT_ID, 'text' => 'sj hari ini'])->assertUnauthorized();
+        $this->bridge('sj hari ini', 'salah')->assertUnauthorized();
+        $this->bridge('')->assertUnprocessable();
+
+        // Belum login (belum dihubungkan): tidak ada data
+        $this->bridge('ada SJ hari ini?')
+            ->assertOk()
+            ->assertJsonPath('linked', false)
+            ->assertJsonPath('parse_mode', 'HTML')
+            ->assertJson(fn ($json) => $json->where('reply', fn (string $reply): bool => str_contains($reply, 'belum terhubung'))->etc());
+
+        // Hubungkan dengan kode dari halaman Profil WMS
+        $code = TelegramBot::issueLinkCode($user);
+        $this->bridge("/start wms_{$code}")->assertOk()->assertJsonPath('linked', true);
+        $this->assertSame(self::CHAT_ID, $user->refresh()->telegram_chat_id);
+
+        // Pertanyaan dijawab AI sesuai akun; WMS tidak mengirim apa pun ke Telegram (bot gabungan yang mengirim)
+        Http::fake(['ai.test/*' => Http::response($this->aiAnswer('Hari ini ada 1 SJ.'))]);
+        $this->bridge('ada SJ hari ini?')->assertOk()->assertJsonPath('reply', 'Hari ini ada 1 SJ.');
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org'));
     }
 
     public function test_summary_of_today_answers_a_plain_question(): void
@@ -310,6 +342,11 @@ class TelegramBotTest extends TestCase
     private function shipment(array $attributes): CsaShipment
     {
         return CsaShipment::create(['kode_gudang' => 'GMCRB', 'nama_gudang' => 'GUDANG MSIS CIREBON', ...$attributes]);
+    }
+
+    private function bridge(string $text, string $token = 'jembatan-tes'): TestResponse
+    {
+        return $this->postJson('/api/telegram-bridge', ['chat_id' => self::CHAT_ID, 'text' => $text], ['Authorization' => "Bearer {$token}"]);
     }
 
     private function webhook(string $text): void

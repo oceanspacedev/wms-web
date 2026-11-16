@@ -5,11 +5,15 @@ use App\Http\Controllers\Api\V1\HomeApiController;
 use App\Http\Controllers\Api\V1\PurchaseOrderApiController;
 use App\Http\Controllers\Api\V1\TrackingOrderApiController;
 use App\Http\Controllers\Api\V1\UserProfileApiController;
+use App\Http\Controllers\TelegramBridgeController;
 use App\Http\Controllers\TelegramWebhookController;
 use Illuminate\Support\Facades\Route;
 
 // Pesan dari bot Telegram; dicek lewat secret header, bukan login
 Route::post('/telegram/webhook', TelegramWebhookController::class)->name('telegram.webhook');
+
+// Bot Telegram gabungan (web lain pemilik bot) meneruskan pesan WMS ke sini; dicek lewat token integrasi
+Route::post('/telegram-bridge', TelegramBridgeController::class)->middleware('throttle:120,1')->name('telegram.bridge');
 
 Route::middleware('throttle:api-login')->group(function (): void {
     Route::post('/login', [AuthController::class, 'login'])->name('auth.login');
