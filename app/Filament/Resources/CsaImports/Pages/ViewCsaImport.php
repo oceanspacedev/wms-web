@@ -8,6 +8,7 @@ use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Schema;
+use Illuminate\Contracts\Support\Htmlable;
 
 class ViewCsaImport extends ViewRecord
 {
@@ -19,6 +20,34 @@ class ViewCsaImport extends ViewRecord
             ->components([
                 $this->getRelationManagersContentComponent(),
             ]);
+    }
+
+    public function getTitle(): string|Htmlable
+    {
+        return 'Laporan '.$this->record->reportLabel();
+    }
+
+    /**
+     * Periode laporan; nama file tidak ditampilkan karena bisa sangat panjang (tetap terlihat di daftar import).
+     */
+    public function getSubheading(): ?string
+    {
+        $record = $this->record;
+
+        return $record->period_start && $record->period_end
+            ? $record->period_start->format('d/m').' – '.$record->period_end->format('d/m/Y').' ('.$record->periodDays().' hari)'
+            : 'diupload '.$record->created_at?->format('d/m/Y H:i');
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function getBreadcrumbs(): array
+    {
+        return [
+            CsaImportResource::getUrl() => CsaImportResource::getNavigationLabel(),
+            'Detail',
+        ];
     }
 
     protected function getHeaderActions(): array

@@ -2,9 +2,11 @@
 
 namespace App\Filament\Resources\TrackingOrders\Schemas;
 
+use App\Models\Depo;
 use App\Support\MediaFileName;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Grid;
@@ -66,12 +68,21 @@ class TrackingOrderForm
                     ->description('Dokumentasi serah terima barang, foto fisik, dan alamat')
                     ->extraAttributes(['class' => 'h-full'])
                     ->schema([
-                        Grid::make(2)
+                        Grid::make(3)
                             ->schema([
                                 TextInput::make('nama_pengirim')
                                     ->label('Nama Pengirim')
                                     ->maxLength(255)
                                     ->placeholder('Contoh: Heidy / Tomy / Fauzan'),
+
+                                // Kosongkan: otomatis dari depo akun kurir yang mencatat SJ
+                                Select::make('depo_id')
+                                    ->label('Depo')
+                                    ->placeholder('Otomatis dari akun kurir')
+                                    ->relationship('depo', 'nama')
+                                    ->getOptionLabelFromRecordUsing(fn (Depo $record): string => $record->label())
+                                    ->searchable(['nama', 'kode'])
+                                    ->preload(),
 
                                 TextInput::make('nama_penerima')
                                     ->label('Nama Penerima')

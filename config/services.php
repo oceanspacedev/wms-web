@@ -60,6 +60,25 @@ return [
         'ca_bundle' => env('WAG_CA_BUNDLE'),
     ],
 
+    // Bot Telegram untuk tanya data Surat Jalan; token dari @BotFather, secret bebas (dicek di setiap webhook)
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'bot_username' => env('TELEGRAM_BOT_USERNAME'),
+        'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
+        // Awalan kode hubungkan akun (t.me/bot?start=wms_KODE) supaya bot gabungan tahu link itu milik WMS
+        'start_prefix' => env('TELEGRAM_START_PREFIX', 'wms_'),
+        // Token untuk bot gabungan (web lain pemilik bot) yang meneruskan pesan WMS ke /api/telegram-bridge
+        'bridge_token' => env('TELEGRAM_BRIDGE_TOKEN'),
+    ],
+
+    // AI (API kompatibel OpenAI) untuk menjawab pertanyaan bebas di bot Telegram; kosong = bot pakai perintah kata kunci saja
+    'ai' => [
+        'base_url' => env('OPENAI_COMPATIBLE_BASE_URL'),
+        'api_key' => env('OPENAI_COMPATIBLE_API_KEY'),
+        'model' => env('OPENAI_COMPATIBLE_MODEL'),
+        'timeout' => (int) env('OPENAI_COMPATIBLE_TIMEOUT', 45),
+    ],
+
     // Link download aplikasi mobile WMS (sam-app), dikirim via WhatsApp saat akun baru dibuat
     'wms_app' => [
         'name' => env('WMS_APP_NAME', 'WMS'),

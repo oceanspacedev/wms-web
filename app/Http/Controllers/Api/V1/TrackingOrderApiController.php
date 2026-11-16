@@ -97,7 +97,7 @@ class TrackingOrderApiController extends Controller
         }
 
         $perPage = min((int) $request->input('per_page', 20), 100);
-        $orders = $query->latest('tanggal_pengiriman')->paginate($perPage);
+        $orders = $query->with('depo')->latest('tanggal_pengiriman')->paginate($perPage);
 
         return TrackingOrderResource::collection($orders);
     }

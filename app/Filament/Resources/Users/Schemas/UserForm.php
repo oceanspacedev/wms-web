@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Users\Schemas;
 
+use App\Models\Depo;
 use App\Models\User;
 use App\Support\MediaFileName;
 use App\Support\ShipmentOptions;
@@ -14,6 +15,7 @@ use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -27,7 +29,7 @@ class UserForm
             ->components([
                 Group::make([
                     Section::make('Informasi Pengguna')
-                        ->description('Data profil dan kredensial login pengguna.')
+                        ->description('Data profil dan login pengguna.')
                         ->schema([
                             TextInput::make('name')
                                 ->label('Nama Lengkap')
@@ -63,7 +65,7 @@ class UserForm
                                     },
                                 ]),
                             TextInput::make('email')
-                                ->label('Email Address')
+                                ->label('Email')
                                 ->email()
                                 ->nullable()
                                 ->unique(ignoreRecord: true)
@@ -119,47 +121,57 @@ class UserForm
                                 ->columnSpanFull(),
                         ])
                         ->columns(2),
-                ])
-                    ->columnSpan(['lg' => 2]),
 
-                Group::make([
-                    Section::make('Foto Profil')
-                        ->schema([
-                            FileUpload::make('avatar_url')
-                                ->hiddenLabel()
-                                ->avatar()
-                                ->alignCenter()
-                                ->directory('avatars')
-                                ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => MediaFileName::make($file, $get('username') ?: $get('name'), 'avatar'))
-                                ->imageEditor()
-                                ->circleCropper()
-                                ->maxSize(2048),
-                        ]),
-
-                    Section::make('Peran & Akses')
-                        ->description('Pilih peran hak akses untuk pengguna ini.')
+                    // Keterangan tiap isian cukup di ikon ⓘ supaya form tidak penuh teks
+                    Section::make('Peran & Penempatan')
+                        ->description('Hak akses dan tempat kerja pengguna.')
                         ->schema([
                             Select::make('roles')
-                                ->hiddenLabel()
+                                ->label('Peran')
+                                ->placeholder('Pilih peran')
                                 ->relationship('roles', 'name')
                                 ->multiple()
                                 ->preload()
                                 ->searchable(),
 
-                            TextInput::make('kode_gudang_arsip')
-                                ->label('Kode Gudang Arsip')
-                                ->placeholder('GDG-BDG-01')
-                                ->maxLength(50)
-                                ->helperText('Untuk akun petugas gudang (role "gudang" + "panel_user"). Menentukan PO di SCM Arsip yang bisa dikirimi Memo/DO.'),
+                            Select::make('depo_id')
+                                ->label('Depo')
+                                ->placeholder('Belum ada depo')
+                                ->relationship('depo', 'nama')
+                                ->getOptionLabelFromRecordUsing(fn (Depo $record): string => $record->label())
+                                ->searchable(['nama', 'kode'])
+                                ->preload()
+                                ->hintIcon(Heroicon::OutlinedInformationCircle, 'Depo tempat kurir/admin bekerja (Master Depo). Ikut tercatat otomatis di surat jalan yang dikirim kurir.'),
 
                             Select::make('cabang')
                                 ->label('Cabang Data Pengiriman')
                                 ->placeholder('Semua cabang')
                                 ->options(fn (): array => ShipmentOptions::cabang())
                                 ->searchable()
-                                ->helperText('Untuk admin cabang: hanya melihat & mengisi Data Pengiriman cabang ini. Kosongkan untuk admin pusat.'),
-                        ]),
+                                ->hintIcon(Heroicon::OutlinedInformationCircle, 'Untuk admin cabang: hanya melihat & mengisi Data Pengiriman cabang ini. Kosongkan untuk admin pusat.'),
+
+                            TextInput::make('kode_gudang_arsip')
+                                ->label('Kode Gudang Arsip')
+                                ->placeholder('GDG-BDG-01')
+                                ->maxLength(50)
+                                ->hintIcon(Heroicon::OutlinedInformationCircle, 'Untuk akun petugas gudang (role "gudang" + "panel_user"). Menentukan PO di SCM Arsip yang bisa dikirimi Memo/DO.'),
+                        ])
+                        ->columns(2),
                 ])
+                    ->columnSpan(['lg' => 2]),
+
+                Section::make('Foto Profil')
+                    ->schema([
+                        FileUpload::make('avatar_url')
+                            ->hiddenLabel()
+                            ->avatar()
+                            ->alignCenter()
+                            ->directory('avatars')
+                            ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => MediaFileName::make($file, $get('username') ?: $get('name'), 'avatar'))
+                            ->imageEditor()
+                            ->circleCropper()
+                            ->maxSize(2048),
+                    ])
                     ->columnSpan(['lg' => 1]),
             ]);
     }

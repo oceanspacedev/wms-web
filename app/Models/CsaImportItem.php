@@ -56,6 +56,16 @@ class CsaImportItem extends Model
     }
 
     /**
+     * Brand + model untuk tampilan: "TECNO CAMON 50 CN5 8/128"; brand tidak diulang kalau sudah ada di nama model (MOTOPAD 60).
+     */
+    public function productLabel(): string
+    {
+        $model = $this->shortModel();
+
+        return str_starts_with($model, (string) $this->brand) ? $model : trim($this->brand.' '.$model);
+    }
+
+    /**
      * "GUDANG MSIS SEMARANG" → "SEMARANG".
      */
     public function warehouseLabel(): string

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Filament\Exports\UserExporter;
 use App\Filament\Resources\Users\Pages\ListUsers;
+use App\Models\Depo;
 use App\Models\User;
 use Filament\Actions\Exports\Models\Export;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,6 +30,7 @@ class UserExportTest extends TestCase
             'email' => 'kurir.satu@example.com',
             'kode_gudang_arsip' => 'GDG-BDG-01',
             'cabang' => 'CIREBON',
+            'depo_id' => Depo::factory()->create(['kode' => 'GMCRB', 'nama' => 'CIREBON'])->id,
             'created_at' => Carbon::parse('2026-10-01 08:30:00'),
         ]);
         $courier->assignRole($courierRole, Role::findOrCreate('panel_user', 'web'));
@@ -46,10 +48,10 @@ class UserExportTest extends TestCase
 
         $rows = $this->readRows(Storage::disk('local')->path($export->getFileDirectory().'/'.$export->file_name.'.xlsx'));
 
-        $this->assertSame(['Nama', 'Username', 'Email', 'WhatsApp', 'Role', 'Kode Gudang Arsip', 'Cabang', 'Tanggal Dibuat'], $rows[0]);
+        $this->assertSame(['Nama', 'Username', 'Email', 'WhatsApp', 'Role', 'Kode Gudang Arsip', 'Cabang', 'Depo', 'Tanggal Dibuat'], $rows[0]);
         // Hanya user hasil filter role, dan nomor WhatsApp tetap teks
         $this->assertSame([
-            ['Kurir Satu', 'kurir_satu', 'kurir.satu@example.com', '6281200000001', 'gudang, panel_user', 'GDG-BDG-01', 'CIREBON', '01/10/2026 08:30'],
+            ['Kurir Satu', 'kurir_satu', 'kurir.satu@example.com', '6281200000001', 'gudang, panel_user', 'GDG-BDG-01', 'CIREBON', 'CIREBON', '01/10/2026 08:30'],
         ], array_slice($rows, 1));
     }
 

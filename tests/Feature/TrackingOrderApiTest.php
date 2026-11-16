@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Depo;
 use App\Models\TrackingOrder;
 use App\Models\User;
 use Database\Seeders\TrackingOrderSeeder;
@@ -165,6 +166,42 @@ class TrackingOrderApiTest extends TestCase
         Storage::assertExists($order->foto_penerima);
         $this->assertMatchesRegularExpression('#^tracking-orders/nota/sj-mobile-new-999_nota_\d{8}-\d{6}_[a-z0-9]{5}\.jpg$#', $order->foto_nota_sj);
         $this->assertMatchesRegularExpression('#^tracking-orders/penerima/sj-mobile-new-999_penerima_\d{8}-\d{6}_[a-z0-9]{5}\.jpg$#', $order->foto_penerima);
+    }
+
+    public function test_sj_from_a_courier_records_the_courier_depo(): void
+    {
+        $palembang = Depo::factory()->create(['kode' => 'GMPLB', 'nama' => 'Palembang']);
+        $courier = $this->actAsCourier();
+        // SJ lama sebelum kurir punya depo
+        $old = TrackingOrder::create(['no_sj' => 'SJ-LAMA', 'nama_dealer' => 'Toko Lama', 'user_id' => $courier->id]);
+        $this->assertNull($old->depo_id);
+
+        // Depo diisi: SJ lama yang belum punya depo ikut diberi depo
+        $courier->update(['depo_id' => $palembang->id]);
+        $this->assertSame($palembang->id, $old->refresh()->depo_id);
+
+        Storage::fake();
+        $this->postJson('/api/tracking-orders', [
+            'no_sj' => 'SJ-DEPO-1',
+            'nama_dealer' => 'Toko Baru',
+            'nama_penerima' => 'Siti',
+            'foto_nota_sj' => UploadedFile::fake()->image('nota.jpg'),
+            'foto_penerima' => UploadedFile::fake()->image('penerima.jpg'),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.depo', 'GMPLB')
+            ->assertJsonPath('data.depo_nama', 'PALEMBANG');
+
+        // Kurir pindah depo: SJ yang sudah dicatat tetap tercatat dari depo lama
+        $courier->update(['depo_id' => Depo::factory()->create(['kode' => 'GMJMB', 'nama' => 'JAMBI'])->id]);
+        $this->assertSame($palembang->id, TrackingOrder::where('no_sj', 'SJ-DEPO-1')->value('depo_id'));
+
+        // Nama/kode depo diedit di Master Depo: langsung terbaca di SJ
+        $palembang->update(['kode' => 'GMPLG', 'nama' => 'Palembang Kota']);
+        $this->getJson('/api/tracking-orders?search=SJ-DEPO-1')
+            ->assertOk()
+            ->assertJsonPath('data.0.depo', 'GMPLG')
+            ->assertJsonPath('data.0.depo_nama', 'PALEMBANG KOTA');
     }
 
     public function test_submit_pod_endpoints_are_gone(): void

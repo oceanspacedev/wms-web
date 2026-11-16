@@ -194,7 +194,7 @@ class StockAllocationTest extends TestCase
 
         Livewire::test(ViewStockAllocation::class, ['record' => $allocation->getRouteKey()])
             ->assertOk()
-            ->assertSee('5 gudang · 1 SKU · target DOS 30 hari')
+            ->assertSee('5 gudang · 1 SKU · target stok cukup 30 hari')
             // Kartu ringkasan tidak ada lagi; angka totalnya ada di daftar Alokasi Stok
             ->assertDontSee(['PO Awal', 'Sisa PO', '325 unit'])
             ->assertSeeLivewire(TransfersRelationManager::class)
@@ -205,8 +205,9 @@ class StockAllocationTest extends TestCase
 
         Livewire::test(TransfersRelationManager::class, ['ownerRecord' => $allocation, 'pageClass' => ViewStockAllocation::class])
             ->assertCanSeeTableRecords($allocation->transfers)
-            // Unit stok sebelum → sesudah semua transfer: GTC kirim 280 unit, GTBDG terima 290 unit
-            ->assertSee(['stok 400 → 120 · DOS 400 → 120', 'stok 10 → 300 · DOS 1 → 30', 'stok 20 → 0 · tidak laku'])
+            // Dibaca seperti kalimat: kirim dari → ke, dan stok kedua gudang cukup berapa hari
+            ->assertSee(['GTC → GTBDG', 'GTC cukup > 1 tahun · GTBDG cukup 1 hari', 'GTTSK tidak laku · GTBDG cukup 1 hari', 'GTC cukup > 1 tahun · GTKRW cukup 25 hari'])
+            ->assertSee('3 saran · 3 belum disetujui')
             ->callAction(TestAction::make('approve')->table($transfer))
             ->assertDispatched('stock-allocation-updated');
 

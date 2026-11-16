@@ -36,7 +36,7 @@ class ExportTrackingOrdersJob implements ShouldQueue
 
     public function handle(TrackingOrderExporter $exporter): void
     {
-        $orders = TrackingOrder::query()->whereKey($this->orderIds)->get()->keyBy('id');
+        $orders = TrackingOrder::query()->with('depo')->whereKey($this->orderIds)->get()->keyBy('id');
         $ordered = collect($this->orderIds)->map(fn (int $id): ?TrackingOrder => $orders->get($id))->filter();
 
         $file = tempnam(sys_get_temp_dir(), 'surat-jalan').'.xlsx';

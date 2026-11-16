@@ -6,6 +6,7 @@ use App\Filament\Resources\StockAllocations\StockAllocationResource;
 use App\Models\StockAllocation;
 use App\Models\StockAllocationLine;
 use App\Models\StockAllocationTransfer;
+use App\Models\StockMutation;
 use App\Services\StockAllocationService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -47,6 +48,8 @@ class TransfersRelationManager extends RelationManager
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['fromLine', 'toLine', 'mutation']))
             ->defaultSort('qty', 'desc')
             ->paginated([25, 50, 100])
+            // Posisi pekerjaan dalam satu baris, mis. "53 saran · 1 disetujui · 52 belum disetujui"
+            ->description(fn (): string => $this->progressSummary())
             ->columns([
                 // Teks seperlunya: kode SKU & region muncul saat kursor diarahkan ke nama produk
                 TextColumn::make('product_name')
@@ -54,14 +57,14 @@ class TransfersRelationManager extends RelationManager
                     ->tooltip(fn (StockAllocationTransfer $record): string => $record->sku.' · '.$record->region)
                     ->searchable(['product_name', 'sku'])
                     ->wrap(),
-                TextColumn::make('from_warehouse')
-                    ->label('Dari')
-                    ->weight('bold')
-                    ->description(fn (StockAllocationTransfer $record): string => $this->lineChange($record->fromLine)),
-                TextColumn::make('to_warehouse')
-                    ->label('Ke')
-                    ->weight('bold')
-                    ->description(fn (StockAllocationTransfer $record): string => $this->lineChange($record->toLine)),
+                // Dibaca seperti kalimat: kirim dari → ke, karena stok penerima cuma cukup sekian hari
+                TextColumn::make('route')
+                    ->label('Kirim')
+                    ->state(fn (StockAllocationTransfer $record): string => $record->from_warehouse.' → '.$record->to_warehouse)
+                    ->weight('medium')
+                    ->description(fn (StockAllocationTransfer $record): string => $this->cover($record->fromLine, $record->from_warehouse).' · '.$this->cover($record->toLine, $record->to_warehouse))
+                    // Alasan lengkap saat kursor diarahkan
+                    ->tooltip(fn (StockAllocationTransfer $record): string => $this->reason($record)),
                 TextColumn::make('qty')
                     ->label('Qty')
                     ->numeric(locale: 'id')
@@ -70,19 +73,15 @@ class TransfersRelationManager extends RelationManager
                     ->description(fn (StockAllocationTransfer $record): ?string => $record->qty !== $record->suggested_qty
                         ? 'saran '.$record->suggested_qty
                         : null)
-                    // Alasan saran saat kursor diarahkan ke qty
-                    ->tooltip(fn (StockAllocationTransfer $record): string => $this->reason($record))
                     ->sortable(),
-                // Saran yang belum diputuskan cukup teks abu-abu; badge hanya untuk yang sudah disetujui/ditolak
+                // Satu status saja: sudah masuk dokumen mutasi → status dokumennya, belum → keputusan saran.
+                // Yang belum diputuskan cukup teks abu-abu; badge untuk yang sudah ada keputusan.
                 TextColumn::make('status')
                     ->label('Status')
-                    ->badge(fn (string $state): bool => $state !== StockAllocationTransfer::STATUS_PENDING)
-                    ->formatStateUsing(fn (string $state): string => StockAllocationTransfer::STATUS_LABELS[$state] ?? $state)
-                    ->color(fn (string $state): string => StockAllocationTransfer::STATUS_COLORS[$state] ?? 'gray')
-                    // Sudah masuk dokumen mutasi: nomor & statusnya, mis. "MUT-2610-001 · Dikirim"
-                    ->description(fn (StockAllocationTransfer $record): ?string => $record->mutation
-                        ? $record->mutation->number.' · '.$record->mutation->statusLabel()
-                        : null),
+                    ->state(fn (StockAllocationTransfer $record): string => $this->progress($record)['label'])
+                    ->badge(fn (StockAllocationTransfer $record): bool => $record->status !== StockAllocationTransfer::STATUS_PENDING)
+                    ->color(fn (StockAllocationTransfer $record): string => $this->progress($record)['color'])
+                    ->description(fn (StockAllocationTransfer $record): ?string => $this->hasDocument($record) ? $record->mutation->number : null),
             ])
             ->filters([
                 SelectFilter::make('status')
@@ -189,18 +188,51 @@ class TransfersRelationManager extends RelationManager
         return ! $record?->isLocked() && (auth()->user()?->can('update', $this->ownerRecord) ?? false);
     }
 
-    private function lineChange(?StockAllocationLine $line): string
+    /**
+     * Stok gudang cukup untuk berapa hari dalam bahasa biasa: "GMJKT cukup 19 hari", "GMSBY tidak laku", "GMPKU stok habis".
+     */
+    private function cover(?StockAllocationLine $line, string $warehouse): string
     {
-        if ($line === null) {
-            return '–';
+        return $warehouse.' '.match (true) {
+            $line === null => '–',
+            $line->dos_before === null => 'tidak laku',
+            $line->stock <= 0 => 'stok habis',
+            // Angka ribuan hari (stok banyak, lakunya sedikit) cukup dibaca "lebih dari setahun"
+            $line->dos_before > 365 => 'cukup > 1 tahun',
+            default => 'cukup '.StockAllocationResource::days($line->dos_before).' hari',
+        };
+    }
+
+    private function hasDocument(StockAllocationTransfer $transfer): bool
+    {
+        return isset(StockMutation::STATUS_LABELS[$transfer->mutation?->status]);
+    }
+
+    /**
+     * @return array{label: string, color: string}
+     */
+    private function progress(StockAllocationTransfer $transfer): array
+    {
+        if ($this->hasDocument($transfer)) {
+            return ['label' => $transfer->mutation->statusLabel(), 'color' => StockMutation::STATUS_COLORS[$transfer->mutation->status]];
         }
 
-        // Stok sesudah = stok + semua transfer masuk − keluar untuk produk ini di gudang tsb
-        $stock = 'stok '.number_format($line->stock, 0, ',', '.').' → '.number_format($line->stockAfter(), 0, ',', '.');
+        return [
+            'label' => StockAllocationTransfer::STATUS_LABELS[$transfer->status] ?? $transfer->status,
+            'color' => StockAllocationTransfer::STATUS_COLORS[$transfer->status] ?? 'gray',
+        ];
+    }
 
-        return $stock.' · '.($line->dos_before === null
-            ? 'tidak laku'
-            : 'DOS '.StockAllocationResource::days($line->dos_before).' → '.StockAllocationResource::days($line->dos_after));
+    private function progressSummary(): string
+    {
+        $counts = $this->ownerRecord->transfers()->toBase()->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
+
+        return implode(' · ', array_filter([
+            $counts->sum().' saran',
+            ($approved = (int) ($counts[StockAllocationTransfer::STATUS_APPROVED] ?? 0)) > 0 ? $approved.' disetujui' : null,
+            ($pending = (int) ($counts[StockAllocationTransfer::STATUS_PENDING] ?? 0)) > 0 ? $pending.' belum disetujui' : null,
+            ($rejected = (int) ($counts[StockAllocationTransfer::STATUS_REJECTED] ?? 0)) > 0 ? $rejected.' ditolak' : null,
+        ]));
     }
 
     /**
@@ -216,14 +248,20 @@ class TransfersRelationManager extends RelationManager
         }
 
         $target = $this->ownerRecord->target_dos;
-        $number = fn (float $value): string => number_format($value, $value > 0 && $value < 10 ? 1 : 0, ',', '.');
-        $cover = fn (StockAllocationLine $line): string => $line->dos_before === null ? 'tidak laku' : 'stok cukup '.StockAllocationResource::days($line->dos_before).' hari';
+        // Satu desimal hanya untuk angka kecil yang memang pecahan: 2,5/hari, tapi 1/hari (bukan 1,0)
+        $number = fn (float $value): string => number_format($value, $value < 10 && round($value, 1) != round($value) ? 1 : 0, ',', '.');
+        // Penerima & pengirim dijelaskan sama: stok berapa, laku berapa per hari, cukup berapa hari.
+        // Barang di jalan hanya ditulis untuk penerima, karena kelebihan pengirim dihitung dari stok fisik saja.
+        $cover = fn (StockAllocationLine $line, bool $withIncoming = false): string => 'stok '.$number((float) $line->stock)
+            .($withIncoming && $line->incoming > 0 ? ' (+'.$number($line->incoming).' di jalan)' : '')
+            .', '.($line->dos_before === null
+                ? 'tidak laku'
+                : 'laku '.$number((float) $line->avg_daily_sales).'/hari, cukup '.StockAllocationResource::days($line->dos_before).' hari');
         $extra = max(0, (int) floor($from->stock - $target * (float) $from->avg_daily_sales));
 
         $hub = fn (StockAllocationLine $line): string => $line->region === StockAllocationService::HUB_REGION ? ' (pusat)' : '';
 
-        return $to->warehouse.$hub($to).' laku '.$number((float) $to->avg_daily_sales).'/hari, '.$cover($to)
-            .($to->incoming > 0 ? ' (+'.$number($to->incoming).' di jalan)' : '')
+        return $to->warehouse.$hub($to).' '.$cover($to, withIncoming: true)
             .' → kurang '.$number($to->need_qty).' unit untuk '.$target.' hari. '
             .$from->warehouse.$hub($from).' '.$cover($from)
             .' → lebih '.$number($extra).' unit.';

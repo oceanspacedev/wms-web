@@ -61,10 +61,11 @@ class LinesRelationManager extends RelationManager
                     ->alignment(Alignment::End)
                     ->sortable(),
                 TextColumn::make('dos_before')
-                    ->label('DOS')
+                    // DOS dalam bahasa biasa: stok cukup untuk berapa hari, sebelum → sesudah transfer
+                    ->label('Cukup untuk')
                     ->state(fn (StockAllocationLine $record): string => $record->dos_before === null
-                        ? '–'
-                        : StockAllocationResource::days($record->dos_before).' → '.StockAllocationResource::days($record->dos_after))
+                        ? 'tidak laku'
+                        : StockAllocationResource::days($record->dos_before).' → '.StockAllocationResource::days($record->dos_after).' hari')
                     ->sortable(['dos_before']),
                 TextColumn::make('status')
                     ->label('Status')

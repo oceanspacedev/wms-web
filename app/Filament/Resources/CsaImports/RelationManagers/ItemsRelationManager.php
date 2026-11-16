@@ -6,7 +6,6 @@ use App\Models\CsaImport;
 use App\Models\CsaImportItem;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Support\Enums\Alignment;
-use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
@@ -30,6 +29,11 @@ class ItemsRelationManager extends RelationManager
     protected static ?string $pluralModelLabel = 'barang';
 
     /**
+     * @var array<string, string>|null
+     */
+    private ?array $warehouseSummaries = null;
+
+    /**
      * Laporan realisasi TO tidak berisi penjualan.
      */
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
@@ -45,53 +49,59 @@ class ItemsRelationManager extends RelationManager
             ->label('Gudang')
             ->titlePrefixedWithLabel(false)
             ->getTitleFromRecordUsing(fn (CsaImportItem $record): string => $record->warehouseLabel())
-            ->getDescriptionFromRecordUsing(fn (CsaImportItem $record): string => $record->kode_gudang)
+            // Total gudang langsung di judulnya, jadi tidak perlu baris ringkasan terpisah
+            ->getDescriptionFromRecordUsing(fn (CsaImportItem $record): string => $this->warehouseSummary($record->kode_gudang))
             // Gudang yang paling banyak terjual di atas
+            // Dihitung sekali per gudang lewat join (subquery per baris lebih lambat)
             ->orderQueryUsing(fn (Builder $query): Builder => $query
-                ->orderByRaw('(select sum(i.qty) from csa_import_items i where i.csa_import_id = csa_import_items.csa_import_id and i.kode_gudang = csa_import_items.kode_gudang) desc')
-                ->orderBy('kode_gudang'))
+                ->select('csa_import_items.*')
+                ->joinSub(
+                    $this->getOwnerRecord()->items()->getQuery()
+                        ->select('kode_gudang as warehouse_code')
+                        ->selectRaw('sum(qty) as warehouse_qty')
+                        ->groupBy('kode_gudang'),
+                    'warehouses',
+                    'warehouses.warehouse_code',
+                    '=',
+                    'csa_import_items.kode_gudang',
+                )
+                ->orderByDesc('warehouses.warehouse_qty')
+                ->orderBy('csa_import_items.kode_gudang'))
             ->collapsible();
 
         return $table
             ->recordTitleAttribute('nama_barang')
+            // Judul sudah ada di tab, jadi tidak diulang di atas tabel
+            ->heading(null)
             ->columns([
+                // Satu baris saja: brand + model, kode & nama lengkap muncul saat kursor diarahkan
                 TextColumn::make('model')
                     ->label('Barang')
-                    ->formatStateUsing(fn (CsaImportItem $record): string => $record->shortModel())
-                    ->description(fn (CsaImportItem $record): ?string => $record->brand)
+                    ->formatStateUsing(fn (CsaImportItem $record): string => $record->productLabel())
                     ->tooltip(fn (CsaImportItem $record): string => $record->kode_barang.' · '.$record->nama_barang)
                     ->searchable(['nama_barang', 'kode_barang'])
-                    ->weight('medium')
                     ->wrap(),
                 TextColumn::make('warna')
                     ->label('Warna')
+                    ->color('gray')
                     ->placeholder('-'),
                 TextColumn::make('qty')
                     ->label('Terjual')
                     ->numeric(locale: 'id')
+                    ->weight('medium')
                     ->alignment(Alignment::End)
-                    ->sortable()
-                    ->summarize(Sum::make()->label('')->numeric(locale: 'id')),
+                    ->sortable(),
                 TextColumn::make('nominal')
                     ->label('Nominal')
                     ->money('IDR', locale: 'id', decimalPlaces: 0)
                     ->alignment(Alignment::End)
                     ->color('gray')
-                    ->sortable()
-                    ->summarize(Sum::make()->label('')->money('IDR', locale: 'id', decimalPlaces: 0)),
+                    ->sortable(),
             ])
             ->defaultGroup($byWarehouse)
-            ->groups([
-                $byWarehouse,
-                Group::make('model')
-                    ->label('Barang')
-                    ->titlePrefixedWithLabel(false)
-                    ->getTitleFromRecordUsing(fn (CsaImportItem $record): string => $record->shortModel())
-                    ->collapsible(),
-            ])
+            ->groupingSettingsHidden()
             // Daftar gudang + total dulu; satu gudang tidak terpotong ke halaman lain
             ->collapsedGroupsByDefault()
-            ->groupingDirectionSettingHidden()
             ->paginated(false)
             ->defaultSort('qty', 'desc')
             ->filters([
@@ -119,5 +129,36 @@ class ItemsRelationManager extends RelationManager
                         ->pluck('brand', 'brand')
                         ->all()),
             ]);
+    }
+
+    /**
+     * "GMJKT · 18.509 unit · Rp 29,6 M"; ikut filter & pencarian yang aktif, dihitung sekali per tampilan.
+     */
+    private function warehouseSummary(string $code): string
+    {
+        $this->warehouseSummaries ??= $this->getFilteredTableQuery()
+            ->reorder()
+            ->select('kode_gudang')
+            ->selectRaw('sum(qty) as qty, sum(nominal) as nominal')
+            ->groupBy('kode_gudang')
+            ->get()
+            ->mapWithKeys(fn (CsaImportItem $item): array => [
+                $item->kode_gudang => $item->kode_gudang.' · '.number_format($item->qty, 0, ',', '.').' unit · '.$this->rupiah((float) $item->nominal),
+            ])
+            ->all();
+
+        return $this->warehouseSummaries[$code] ?? $code;
+    }
+
+    /**
+     * Nominal diringkas supaya judul gudang tetap pendek: Rp 29,6 M / Rp 750 jt.
+     */
+    private function rupiah(float $value): string
+    {
+        return match (true) {
+            $value >= 1_000_000_000 => 'Rp '.number_format($value / 1_000_000_000, 1, ',', '.').' M',
+            $value >= 1_000_000 => 'Rp '.number_format($value / 1_000_000, 0, ',', '.').' jt',
+            default => 'Rp '.number_format($value, 0, ',', '.'),
+        };
     }
 }

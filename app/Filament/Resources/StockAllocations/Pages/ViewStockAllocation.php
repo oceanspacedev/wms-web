@@ -65,7 +65,7 @@ class ViewStockAllocation extends ViewRecord
                 : null,
             $record->warehouse_count.' gudang',
             $record->sku_count.' SKU',
-            'target DOS '.$record->target_dos.' hari',
+            'target stok cukup '.$record->target_dos.' hari',
         ]));
     }
 

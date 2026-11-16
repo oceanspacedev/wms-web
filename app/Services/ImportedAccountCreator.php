@@ -17,6 +17,7 @@ class ImportedAccountCreator
     /**
      * @param  string  $usernameSeed  teks asal username, mis. bagian email sebelum "@" atau nama lengkap
      * @param  string  $usernameFallback  awalan username kalau teks asalnya terlalu pendek
+     * @param  ?int  $depoId  depo dari Master Depo, kalau sudah diketahui
      * @return SendUserAccountActivatedWhatsAppJob pesan WhatsApp berisi password awal; belum dikirim, kirim lewat dispatchOneByOne()
      */
     public function create(
@@ -25,6 +26,7 @@ class ImportedAccountCreator
         ?string $email,
         string $usernameSeed,
         string $usernameFallback,
+        ?int $depoId = null,
     ): SendUserAccountActivatedWhatsAppJob {
         $password = $this->readablePassword();
         $user = User::create([
@@ -33,6 +35,7 @@ class ImportedAccountCreator
             'email' => $email,
             'whatsapp_number' => $whatsAppNumber,
             'password' => $password,
+            'depo_id' => $depoId,
         ]);
         $user->syncRoles([Role::firstOrCreate(['name' => Utils::getPanelUserRoleName(), 'guard_name' => 'web'])]);
 

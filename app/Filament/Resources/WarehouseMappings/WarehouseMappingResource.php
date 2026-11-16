@@ -25,13 +25,13 @@ class WarehouseMappingResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingStorefront;
 
-    protected static \UnitEnum|string|null $navigationGroup = 'Logistik & Ekspedisi';
+    protected static \UnitEnum|string|null $navigationGroup = 'Master Data';
 
     protected static ?string $navigationLabel = 'Pemetaan Gudang ke Cabang';
 
     protected static ?string $modelLabel = 'Pemetaan Gudang';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     public static function form(Schema $schema): Schema
     {

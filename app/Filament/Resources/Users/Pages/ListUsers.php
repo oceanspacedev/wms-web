@@ -70,7 +70,7 @@ class ListUsers extends ListRecords
             ->schema([
                 FileUpload::make('file')
                     ->label('File Excel (.xlsx)')
-                    ->helperText('Isi kolom Nama Lengkap dan Nomor WhatsApp. Username dibuat otomatis dari nama dan email dikosongkan; nomor WhatsApp yang sudah terdaftar dilewati.')
+                    ->helperText('Isi kolom Nama Lengkap dan Nomor WhatsApp. Kolom Depo boleh diisi nama atau kode depo (mis. Palembang / GMPLB). Username dibuat otomatis dari nama dan email dikosongkan; nomor WhatsApp yang sudah terdaftar tidak dibuat ulang, hanya depo-nya yang diperbarui.')
                     ->disk('local')
                     ->directory('user-imports')
                     ->acceptedFileTypes([
@@ -157,14 +157,17 @@ class ListUsers extends ListRecords
     }
 
     /**
-     * @param  array{created: list<string>, existing: list<string>, incomplete: list<string>}  $result
+     * @param  array{created: list<string>, existing: list<string>, incomplete: list<string>, depo_updated?: list<string>, unknown_depo?: list<string>}  $result
      */
     private function notifyImportResult(array $result, string $createdTitle, string $incompleteLabel, string $emptyBody): void
     {
+        $depoUpdated = $result['depo_updated'] ?? [];
         $lines = collect([
             'Dibuat' => $result['created'],
+            'Depo diperbarui' => $depoUpdated,
             'Sudah punya akun' => $result['existing'],
             $incompleteLabel => $result['incomplete'],
+            'Depo tidak ada di Master Depo' => $result['unknown_depo'] ?? [],
         ])
             ->filter()
             ->map(fn (array $names, string $label): string => "{$label} (".count($names).'): '.implode(', ', $names))
@@ -172,7 +175,7 @@ class ListUsers extends ListRecords
             ->all();
 
         Notification::make()
-            ->title(count($result['created']).' '.$createdTitle)
+            ->title(count($result['created']).' '.$createdTitle.($depoUpdated !== [] ? ' · '.count($depoUpdated).' depo diperbarui' : ''))
             ->body($lines === [] ? $emptyBody : implode('<br>', array_map('e', $lines)))
             ->success()
             ->persistent()

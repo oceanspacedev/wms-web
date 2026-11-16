@@ -124,7 +124,7 @@ class StockReportAllocationTest extends TestCase
         $component = Livewire::test(TransfersRelationManager::class, ['ownerRecord' => $allocation, 'pageClass' => ViewStockAllocation::class]);
 
         $this->assertSame(
-            'GMBDG laku 10/hari, stok cukup 1 hari → kurang 290 unit untuk 30 hari. GMCRB stok cukup 100 hari → lebih 70 unit.',
+            'GMBDG stok 10, laku 10/hari, cukup 1 hari → kurang 290 unit untuk 30 hari. GMCRB stok 100, laku 1/hari, cukup 100 hari → lebih 70 unit.',
             $component->instance()->reason($transfer),
         );
     }
