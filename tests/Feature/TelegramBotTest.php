@@ -73,6 +73,130 @@ class TelegramBotTest extends TestCase
         $this->assertNull($user->refresh()->telegram_chat_id);
     }
 
+    public function test_group_messages_without_mention_or_command_are_ignored(): void
+    {
+        $update = [
+            'update_id' => 10,
+            'message' => [
+                'message_id' => 100,
+                'from' => ['id' => 12345, 'first_name' => 'Budi'],
+                'chat' => ['id' => -1001234567, 'type' => 'supergroup'],
+                'text' => 'halo rekan-rekan gudang',
+            ],
+        ];
+
+        $this->postJson('/api/telegram/webhook', $update, ['X-Telegram-Bot-Api-Secret-Token' => 'rahasia-tes'])->assertOk();
+        Http::assertNothingSent();
+    }
+
+    public function test_group_messages_for_another_bot_are_ignored(): void
+    {
+        $update = [
+            'update_id' => 11,
+            'message' => [
+                'message_id' => 101,
+                'from' => ['id' => 12345, 'first_name' => 'Budi'],
+                'chat' => ['id' => -1001234567, 'type' => 'group'],
+                'text' => '/sj@bot_lain hari ini',
+            ],
+        ];
+
+        $this->postJson('/api/telegram/webhook', $update, ['X-Telegram-Bot-Api-Secret-Token' => 'rahasia-tes'])->assertOk();
+        Http::assertNothingSent();
+    }
+
+    public function test_group_start_command_is_directed_to_private_chat(): void
+    {
+        $update = [
+            'update_id' => 12,
+            'message' => [
+                'message_id' => 102,
+                'from' => ['id' => 12345, 'first_name' => 'Budi'],
+                'chat' => ['id' => -1001234567, 'type' => 'supergroup'],
+                'text' => '/start wms_ABC123',
+            ],
+        ];
+
+        $this->postJson('/api/telegram/webhook', $update, ['X-Telegram-Bot-Api-Secret-Token' => 'rahasia-tes'])->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && $request['chat_id'] === -1001234567
+            && ($request['reply_parameters']['message_id'] ?? null) === 102
+            && str_contains((string) $request['text'], 'jangan menghubungkan akun WMS di dalam grup'));
+    }
+
+    public function test_group_unlinked_user_gets_prompt_to_link(): void
+    {
+        $update = [
+            'update_id' => 13,
+            'message' => [
+                'message_id' => 103,
+                'from' => ['id' => 54321, 'first_name' => 'Doni'],
+                'chat' => ['id' => -1001234567, 'type' => 'supergroup'],
+                'text' => '@wms_tes_bot sj hari ini',
+            ],
+        ];
+
+        $this->postJson('/api/telegram/webhook', $update, ['X-Telegram-Bot-Api-Secret-Token' => 'rahasia-tes'])->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && $request['chat_id'] === -1001234567
+            && ($request['reply_parameters']['message_id'] ?? null) === 103
+            && str_contains((string) $request['text'], 'belum terhubung ke WMS')
+            && str_contains((string) $request['text'], 'Doni'));
+    }
+
+    public function test_group_linked_user_gets_data_replied_to_group(): void
+    {
+        $user = User::factory()->create(['name' => 'Agus', 'telegram_chat_id' => 777]);
+        $user->assignRole(Role::findOrCreate('super_admin', 'web'));
+        $this->order('SJ-GROUP-1', $user);
+
+        $update = [
+            'update_id' => 14,
+            'message' => [
+                'message_id' => 104,
+                'from' => ['id' => 777, 'first_name' => 'Agus'],
+                'chat' => ['id' => -1001234567, 'type' => 'supergroup'],
+                'text' => '@wms_tes_bot cari SJ-GROUP-1',
+            ],
+        ];
+
+        $this->postJson('/api/telegram/webhook', $update, ['X-Telegram-Bot-Api-Secret-Token' => 'rahasia-tes'])->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && $request['chat_id'] === -1001234567
+            && ($request['reply_parameters']['message_id'] ?? null) === 104
+            && str_contains((string) $request['text'], 'SJ-GROUP-1'));
+    }
+
+    public function test_group_reply_to_bot_message_is_answered(): void
+    {
+        $user = User::factory()->create(['name' => 'Agus', 'telegram_chat_id' => 777]);
+        $user->assignRole(Role::findOrCreate('super_admin', 'web'));
+
+        $update = [
+            'update_id' => 15,
+            'message' => [
+                'message_id' => 105,
+                'from' => ['id' => 777, 'first_name' => 'Agus'],
+                'chat' => ['id' => -1001234567, 'type' => 'supergroup'],
+                'reply_to_message' => [
+                    'message_id' => 99,
+                    'from' => ['is_bot' => true, 'username' => 'wms_tes_bot'],
+                ],
+                'text' => 'bantuan',
+            ],
+        ];
+
+        $this->postJson('/api/telegram/webhook', $update, ['X-Telegram-Bot-Api-Secret-Token' => 'rahasia-tes'])->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && $request['chat_id'] === -1001234567
+            && ($request['reply_parameters']['message_id'] ?? null) === 105
+            && str_contains((string) $request['text'], 'contoh pertanyaan'));
+    }
+
     public function test_shared_bot_forwards_wms_messages_through_the_bridge_and_must_link_first(): void
     {
         config(['services.telegram.bridge_token' => 'jembatan-tes']);
