@@ -81,12 +81,37 @@ class TelegramBot
     public function handle(array $update): void
     {
         $message = $update['message'] ?? null;
-        $chatId = $message['chat']['id'] ?? null;
+        if (! is_array($message)) {
+            return;
+        }
+
+        $chat = $message['chat'] ?? [];
+        $chatId = $chat['id'] ?? null;
+        $chatType = (string) ($chat['type'] ?? 'private');
         $text = trim((string) ($message['text'] ?? ''));
 
-        // Hanya chat pribadi; grup belum didukung
-        if ($chatId === null || ($message['chat']['type'] ?? '') !== 'private' || $text === '') {
+        // Mendukung chat pribadi serta grup / supergroup
+        if ($chatId === null || ! in_array($chatType, ['private', 'group', 'supergroup'], true) || $text === '') {
             return;
+        }
+
+        $isGroup = in_array($chatType, ['group', 'supergroup'], true);
+        $messageId = isset($message['message_id']) ? (int) $message['message_id'] : null;
+        $senderId = isset($message['from']['id']) ? (int) $message['from']['id'] : (int) $chatId;
+        $senderName = (string) ($message['from']['first_name'] ?? '');
+
+        if ($isGroup) {
+            $botUsername = ltrim((string) config('services.telegram.bot_username'), '@');
+
+            // Cek apakah pesan di grup memang ditujukan untuk bot ini
+            if (! $this->isMessageForBot($message, $text, $botUsername)) {
+                return;
+            }
+
+            // Bersihkan mention @bot_username dari teks pertanyaan
+            if ($botUsername !== '') {
+                $text = trim((string) preg_replace('/@'.preg_quote($botUsername, '/').'\b/i', '', $text));
+            }
         }
 
         // Jawaban AI bisa beberapa detik: tampilkan "sedang mengetik…" dulu
@@ -94,37 +119,89 @@ class TelegramBot
             $this->telegram->sendChatAction((int) $chatId, 'typing');
         }
 
-        $this->telegram->sendMessage((int) $chatId, $this->reply((int) $chatId, $text));
+        $reply = $this->reply((int) $chatId, $text, $senderId, $senderName, $isGroup);
+
+        $this->telegram->sendMessage((int) $chatId, $reply, $isGroup ? $messageId : null);
     }
 
     /**
      * Balasan (HTML Telegram) untuk satu pesan.
      */
-    public function reply(int $chatId, string $text): string
-    {
+    public function reply(
+        int $chatId,
+        string $text,
+        ?int $senderId = null,
+        ?string $senderName = null,
+        bool $isGroup = false,
+    ): string {
+        $senderId ??= $chatId;
+
         // "/sj@nama_bot hari ini" → "sj hari ini"
         $command = Str::lower(Str::squish((string) preg_replace('/^\/(\w+)(@\w+)?/u', '$1', $text)));
 
-        // "/start wms_KODE" (atau "/start KODE" tanpa awalan)
+        // Di grup, cegah menghubungkan akun demi keamanan token/link code
+        if ($isGroup && preg_match('/^start\b/i', $command) === 1) {
+            $bot = ltrim((string) config('services.telegram.bot_username'), '@');
+            $botLink = $bot !== '' ? "<b>@{$bot}</b>" : 'bot WMS';
+
+            return "⚠️ <b>Hubungkan Akun di Chat Pribadi</b>\n\n"
+                ."Demi keamanan akun Anda, jangan menghubungkan akun WMS di dalam grup.\n"
+                ."Silakan buka chat pribadi dengan {$botLink} lalu jalankan perintah <code>/start</code> di sana.";
+        }
+
+        // "/start wms_KODE" (atau "/start KODE" tanpa awalan) di chat pribadi
         $prefix = preg_quote(Str::lower((string) config('services.telegram.start_prefix', 'wms_')), '/');
 
         if (preg_match('/^start\s+(?:'.$prefix.')?([a-z0-9]+)$/i', $command, $match) === 1) {
-            return $this->link($chatId, Str::upper($match[1]));
+            return $this->link($senderId, Str::upper($match[1]));
         }
 
-        $user = User::query()->where('telegram_chat_id', $chatId)->first();
+        $user = User::query()->where('telegram_chat_id', $senderId)->first();
 
         if ($user === null) {
-            return $this->notLinkedMessage();
+            return $this->notLinkedMessage($senderName, $isGroup);
         }
 
         return match (true) {
             in_array($command, ['start', 'help', 'bantuan', 'menu'], true) => $this->help($user),
             in_array($command, ['putuskan', 'logout', 'stop'], true) => $this->unlink($user),
             // Pertanyaan bebas dijawab AI; tanpa AI (atau kalau AI gagal) pakai perintah kata kunci di bawah
-            WmsAssistant::isConfigured() => $this->askAi($user, $chatId, $text, $command),
+            WmsAssistant::isConfigured() => $this->askAi($user, $senderId, $text, $command),
             default => $this->keywordReply($user, $command, $text),
         };
+    }
+
+    /**
+     * Memastikan pesan di grup memang ditujukan untuk bot ini (mention, reply, atau command).
+     *
+     * @param  array<string, mixed>  $message
+     */
+    private function isMessageForBot(array $message, string $text, string $botUsername): bool
+    {
+        // 1. Reply ke pesan bot kita
+        $replyFrom = $message['reply_to_message']['from'] ?? null;
+        if (is_array($replyFrom) && ($replyFrom['is_bot'] ?? false) === true) {
+            if ($botUsername === '' || strcasecmp((string) ($replyFrom['username'] ?? ''), $botUsername) === 0) {
+                return true;
+            }
+        }
+
+        // 2. Mention @bot_username di dalam teks
+        if ($botUsername !== '' && preg_match('/@'.preg_quote($botUsername, '/').'\b/i', $text) === 1) {
+            return true;
+        }
+
+        // 3. Command diawali slash (mis. "/sj", "/help", "/start", "/cari 123")
+        if (str_starts_with($text, '/')) {
+            // Jika ada bot target spesifik (mis. "/perintah@nama_bot_lain"), pastikan bukan untuk bot lain
+            if (preg_match('/^\/\w+@([a-z0-9_]+)/i', $text, $matches) === 1) {
+                return $botUsername === '' || strcasecmp($matches[1], $botUsername) === 0;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -153,11 +230,24 @@ class TelegramBot
     }
 
     /**
-     * Ajakan login WMS untuk chat yang belum terhubung; jelas menyebut WMS karena bot bisa dipakai bersama sistem lain.
+     * Ajakan login WMS untuk chat yang belum terhubung.
      */
-    private function notLinkedMessage(): string
+    private function notLinkedMessage(?string $senderName = null, bool $isGroup = false): string
     {
         $profile = e(url('/admin/profile'));
+        $bot = ltrim((string) config('services.telegram.bot_username'), '@');
+        $botLink = $bot !== '' ? "<b>@{$bot}</b>" : 'bot WMS';
+
+        if ($isGroup) {
+            $greeting = ($senderName !== null && $senderName !== '') ? 'Halo <b>'.e($senderName).'</b>' : 'Halo';
+
+            return "🔒 <b>{$greeting}, akun Telegram Anda belum terhubung ke WMS.</b>\n\n"
+                ."Untuk dapat melihat data WMS di grup ini, silakan hubungkan akun Anda terlebih dahulu:\n"
+                ."1. Login ke WMS lalu buka halaman Profil: <a href=\"{$profile}\">{$profile}</a>\n"
+                ."2. Klik <b>Hubungkan Telegram</b>\n"
+                ."3. Buka {$botLink} di chat pribadi lalu tekan <b>Start</b>.\n\n"
+                .'Belum punya akun WMS? Hubungi admin WMS.';
+        }
 
         return "🔒 <b>Fitur WMS perlu login dulu.</b>\n\n"
             ."Akun Telegram ini belum terhubung ke akun WMS. Caranya (cukup sekali):\n"

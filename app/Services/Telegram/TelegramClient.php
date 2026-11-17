@@ -18,14 +18,23 @@ class TelegramClient
      */
     public const MAX_MESSAGE_LENGTH = 4096;
 
-    public function sendMessage(int $chatId, string $html): bool
+    public function sendMessage(int $chatId, string $html, ?int $replyToMessageId = null): bool
     {
-        $response = $this->call('sendMessage', [
+        $payload = [
             'chat_id' => $chatId,
             'text' => mb_substr($html, 0, self::MAX_MESSAGE_LENGTH),
             'parse_mode' => 'HTML',
             'link_preview_options' => ['is_disabled' => true],
-        ]);
+        ];
+
+        if ($replyToMessageId !== null) {
+            $payload['reply_parameters'] = [
+                'message_id' => $replyToMessageId,
+                'allow_sending_without_reply' => true,
+            ];
+        }
+
+        $response = $this->call('sendMessage', $payload);
 
         if (! $response->successful()) {
             Log::warning('Gagal mengirim pesan Telegram.', ['status' => $response->status(), 'description' => $response->json('description')]);
