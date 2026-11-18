@@ -67,6 +67,8 @@ class FreightReconciliationService
 
                 if ($billedTotal <= 0 && $billedRate > 0) {
                     $billedTotal = ($billedWeight * $billedRate) + $billedInsurance;
+                } elseif ($billedRate <= 0 && $billedTotal > 0 && $billedWeight > 0) {
+                    $billedRate = round(($billedTotal - $billedInsurance) / $billedWeight, 2);
                 }
 
                 $auditStatus = 'matched';
@@ -245,12 +247,16 @@ class FreightReconciliationService
             $header = null;
             while (($data = fgetcsv($handle, 2000, ',')) !== false) {
                 if (! $header) {
-                    $header = array_map(fn ($h) => strtolower(trim($h)), $data);
+                    $header = array_values($this->normalizeHeaderColumns($data));
 
                     continue;
                 }
                 $row = array_combine($header, array_pad($data, count($header), ''));
-                $rows[] = $this->mapNormalizedFields($row);
+                $normalized = $this->mapNormalizedFields($row);
+
+                if ($normalized['no_resi_awb'] !== '' || $normalized['no_sj'] !== '' || $normalized['destination_city'] !== '') {
+                    $rows[] = $normalized;
+                }
             }
             fclose($handle);
         }
@@ -289,9 +295,7 @@ class FreightReconciliationService
                 $joined = strtolower(implode(' ', $cells));
 
                 if ($this->textLooksLikeInvoiceHeader($joined)) {
-                    foreach ($cells as $column => $name) {
-                        $headerMap[$column] = strtolower(trim($name));
-                    }
+                    $headerMap = $this->normalizeHeaderColumns($cells);
                 }
 
                 continue;
@@ -338,7 +342,8 @@ class FreightReconciliationService
 
     protected function textLooksLikeInvoiceHeader(string $joined): bool
     {
-        $isDepotLog = str_contains($joined, 'nomor sj')
+        $hasWaybill = str_contains($joined, 'waybill');
+        $isDepotLog = ! $hasWaybill && str_contains($joined, 'nomor sj')
             && (str_contains($joined, 'depo') || str_contains($joined, 'berat'));
 
         if ($isDepotLog) {
@@ -350,7 +355,56 @@ class FreightReconciliationService
             || str_contains($joined, 'tarif')
             || str_contains($joined, 'chargeable')
             || str_contains($joined, 'ongkir')
-            || (str_contains($joined, 'resi') && str_contains($joined, 'biaya'));
+            || str_contains($joined, 'waybill')
+            || (str_contains($joined, 'resi') && str_contains($joined, 'biaya'))
+            || (str_contains($joined, 'tujuan') && str_contains($joined, 'tagihan'));
+    }
+
+    /**
+     * Normalkan nama kolom header dan bedakan kolom kembar seperti "KOTA" setelah "PENERIMA" (kota tujuan)
+     * vs "KOTA" setelah "PENGIRIM" (kota asal) supaya tidak saling menimpa.
+     *
+     * @param  array<int|string, mixed>  $cells
+     * @return array<int|string, string>
+     */
+    protected function normalizeHeaderColumns(array $cells): array
+    {
+        $headerMap = [];
+        $used = [];
+        $previousHeader = '';
+
+        foreach ($cells as $column => $name) {
+            $normalized = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $name)));
+
+            if ($normalized === 'kota' || $normalized === 'city') {
+                if (str_contains($previousHeader, 'pengirim') || str_contains($previousHeader, 'sender') || str_contains($previousHeader, 'shipper') || str_contains($previousHeader, 'asal')) {
+                    $normalized = 'kota asal';
+                } elseif (str_contains($previousHeader, 'penerima') || str_contains($previousHeader, 'receiver') || str_contains($previousHeader, 'consignee') || str_contains($previousHeader, 'tujuan')) {
+                    $normalized = 'kota tujuan';
+                }
+            }
+
+            if ($normalized !== '') {
+                $previousHeader = $normalized;
+            }
+
+            $key = $normalized;
+            if ($key !== '' && isset($used[$key])) {
+                $suffix = 2;
+                while (isset($used[$key.'_'.$suffix])) {
+                    $suffix++;
+                }
+                $key .= '_'.$suffix;
+            }
+
+            if ($key !== '') {
+                $used[$key] = true;
+            }
+
+            $headerMap[$column] = $key;
+        }
+
+        return $headerMap;
     }
 
     /**
@@ -372,6 +426,7 @@ class FreightReconciliationService
         ];
 
         $filled = [];
+        $koli = 0.0;
 
         foreach ($row as $key => $val) {
             $field = $this->fieldForHeader((string) $key);
@@ -382,6 +437,13 @@ class FreightReconciliationService
                 continue;
             }
 
+            if ($field === 'koli') {
+                $koli = (float) str_replace(',', '.', $v);
+                $filled['koli'] = true;
+
+                continue;
+            }
+
             $filled[$field] = true;
             $res[$field] = match ($field) {
                 'no_resi_awb', 'no_sj' => $this->reader->normalizeIdentifier($v),
@@ -389,6 +451,12 @@ class FreightReconciliationService
                 'billed_rate', 'billed_insurance', 'billed_total' => Rupiah::parse($v),
                 default => $v,
             };
+        }
+
+        // Untuk ekspedisi bertarif per koli (mis. Karya Mandiri) yang tidak punya kolom berat (kg),
+        // jumlah koli dipakai sebagai pengali tarif.
+        if (! isset($filled['billed_weight']) && $koli > 0) {
+            $res['billed_weight'] = $koli;
         }
 
         return $res;
@@ -407,13 +475,14 @@ class FreightReconciliationService
 
         return match (true) {
             $h === '' || str_contains($h, 'cek') || str_contains($h, 'ket') || str_contains($h, 'nominal') => null,
-            str_contains($h, 'resi') || str_contains($h, 'awb') || str_contains($h, 'shipment') || in_array($h, ['cn', 'connote', 'stt'], true) => 'no_resi_awb',
+            str_contains($h, 'resi') || str_contains($h, 'awb') || str_contains($h, 'shipment') || str_contains($h, 'waybill') || in_array($h, ['cn', 'connote', 'stt'], true) => 'no_resi_awb',
             (bool) preg_match('/\b(nomor|no)\.?\s*sj\b|surat jalan|faktur|^sj$/', $h) => 'no_sj',
             str_contains($h, 'asal') || str_contains($h, 'origin') || str_contains($h, 'depo') => 'origin_depo',
             str_contains($h, 'service') || str_contains($h, 'layanan') => 'service_type',
             str_contains($h, 'asuransi') || str_contains($h, 'insurance') => 'billed_insurance',
             $isWeight && (str_contains($h, 'gross') || str_contains($h, 'aktual') || str_contains($h, 'actual')) => 'gross_weight',
             $isWeight => 'billed_weight',
+            in_array($h, ['koli', 'colly', 'colli', 'qty koli', 'jml koli'], true) => 'koli',
             str_contains($h, 'total') || str_contains($h, 'ongkir') || str_contains($h, 'jumlah') || str_contains($h, 'biaya') => 'billed_total',
             str_contains($h, 'tarif') || str_contains($h, 'rate') || str_contains($h, 'harga') => 'billed_rate',
             str_contains($h, 'tujuan') || str_contains($h, 'kota') || str_contains($h, 'dest') => 'destination_city',
@@ -513,7 +582,12 @@ class FreightReconciliationService
         $keys = [];
 
         foreach ($values as $value) {
+            $raw = $this->upper($value);
             $city = $this->upper(explode('-', (string) $value)[0]);
+
+            if ($raw !== '') {
+                $keys[] = $raw;
+            }
 
             if ($city !== '') {
                 // Ejaan apa adanya dulu (Tarif Kontrak 21 Express memakai "JOGYAKARTA"), lalu ejaan bakunya

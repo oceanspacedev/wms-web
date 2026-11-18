@@ -184,7 +184,13 @@ class FreightInvoiceItem extends Model
             return 'Sesuai: lebih murah dari kontrak Rp '.self::rupiah($agreed).'/kg';
         }
 
-        return 'Sesuai kontrak: '.self::kg((float) $this->billed_weight).' kg × Rp '.self::rupiah($agreed);
+        $reason = 'Sesuai kontrak: '.self::kg((float) $this->billed_weight).' kg × Rp '.self::rupiah($agreed);
+
+        if ((float) $this->billed_insurance > 0) {
+            $reason .= ' + asuransi Rp '.self::rupiah((float) $this->billed_insurance);
+        }
+
+        return $reason;
     }
 
     private static function kg(float $value): string

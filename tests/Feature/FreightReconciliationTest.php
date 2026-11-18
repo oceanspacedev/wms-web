@@ -457,6 +457,76 @@ class FreightReconciliationTest extends TestCase
         $this->assertSame('Sesuai kontrak: 30 kg × Rp 7.000', $item->reason());
     }
 
+    public function test_duplicate_kota_columns_and_koli_fallback_are_parsed_correctly(): void
+    {
+        $path = $this->invoiceFile([
+            ['TANGGAL', 'NO. RESI', 'PENERIMA', 'KOTA', 'PENGIRIM', 'KOTA', 'KOLI', 'BIAYA'],
+            ['2026-09-02', '880', 'RASYA', 'PARAKAN', 'MEDIA SELULAR INDONESIA', 'SEMARANG', 1, 50000],
+            ['2026-09-05', '885', 'CENTRA NUSA', 'SALATIGA', 'CV. TOP', 'SEMARANG', 2, 100000],
+        ]);
+
+        try {
+            $rows = (new FreightReconciliationService)->parseInvoiceFile($path);
+
+            $this->assertCount(2, $rows);
+            $this->assertSame('SEMARANG', $rows[0]['origin_depo']);
+            $this->assertSame('PARAKAN', $rows[0]['destination_city']);
+            $this->assertSame(1.0, $rows[0]['billed_weight']);
+            $this->assertSame(50000.0, $rows[0]['billed_total']);
+
+            $this->assertSame('SEMARANG', $rows[1]['origin_depo']);
+            $this->assertSame('SALATIGA', $rows[1]['destination_city']);
+            $this->assertSame(2.0, $rows[1]['billed_weight']);
+            $this->assertSame(100000.0, $rows[1]['billed_total']);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_jnt_waybill_format_and_insurance_reason_are_parsed_and_matched(): void
+    {
+        ExpeditionRateCard::create([
+            'expedition_id' => $this->expedition->id,
+            'origin_depo' => 'CIREBON',
+            'destination_city' => 'GARAWANGI',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 3000,
+            'min_kg' => 1,
+            'is_active' => true,
+        ]);
+
+        $path = $this->invoiceFile([
+            ['STATEMENT PP PM REG CV.TOP SELULAR'],
+            ['PERIODE OKTOBER 2026'],
+            ['No', 'Tanggal Pengiriman', 'No. Waybill', 'Tempat Tujuan', 'Berat ', 'Biaya Asuransi', 'Total Biaya', 'Total Tagihan', 'Layanan', 'Nomor SJ'],
+            [1, '2026-10-02', '1364424429', 'GARAWANGI', 3, 21056, 51056, 30056, 'EZ', '2610000063'],
+        ]);
+
+        try {
+            $service = new FreightReconciliationService;
+            $rows = $service->parseInvoiceFile($path);
+            $this->assertCount(1, $rows);
+            $this->assertSame('1364424429', $rows[0]['no_resi_awb']);
+
+            $invoice = FreightInvoice::create([
+                'expedition_id' => $this->expedition->id,
+                'invoice_number' => 'INV-JNT-TEST',
+                'invoice_date' => now(),
+                'origin_city' => 'CIREBON',
+                'status' => 'processing',
+            ]);
+
+            $result = $service->reconcile($invoice, $rows);
+            $item = $result->items->sole();
+
+            $this->assertSame('matched', $item->audit_status);
+            $this->assertEquals(3000, $item->billed_rate);
+            $this->assertSame('Sesuai kontrak: 3 kg × Rp 3.000 + asuransi Rp 21.056', $item->reason());
+        } finally {
+            @unlink($path);
+        }
+    }
+
     /**
      * @param  list<list<mixed>>  $rows
      */
