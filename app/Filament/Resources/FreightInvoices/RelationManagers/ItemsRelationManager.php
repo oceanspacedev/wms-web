@@ -69,7 +69,10 @@ class ItemsRelationManager extends RelationManager
                         : 'kontrak -'),
                 TextColumn::make('billed_total')
                     ->label('Ditagih')
-                    ->money('IDR', locale: 'id', decimalPlaces: 0),
+                    ->money('IDR', locale: 'id', decimalPlaces: 0)
+                    ->description(fn (FreightInvoiceItem $record): ?string => (float) $record->billed_insurance > 0
+                        ? 'termasuk asuransi Rp '.number_format((float) $record->billed_insurance, 0, ',', '.')
+                        : null),
                 TextColumn::make('discrepancy_amount')
                     ->label('Selisih')
                     ->state(fn (FreightInvoiceItem $record): float => $record->correctionAmount())
