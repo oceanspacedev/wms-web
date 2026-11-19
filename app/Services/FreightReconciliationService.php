@@ -330,13 +330,34 @@ class FreightReconciliationService
         if (($handle = fopen($filePath, 'r')) !== false) {
             $header = null;
             while (($data = fgetcsv($handle, 2000, ',')) !== false) {
-                if (! $header) {
+                $joined = strtolower(implode(' ', $data));
+                if ($this->textLooksLikeInvoiceHeader($joined)) {
                     $header = array_values($this->normalizeHeaderColumns($data));
 
                     continue;
                 }
+
+                if (! $header) {
+                    continue;
+                }
+
+                $firstNonEmpty = strtolower(trim((string) (collect($data)->first(fn ($val) => trim((string) $val) !== '') ?? '')));
+                if (in_array($firstNonEmpty, ['total', 'grand total', 'sub total', 'subtotal', 'ppn', 'terbilang'], true)
+                    || str_starts_with($firstNonEmpty, 'total')
+                    || str_starts_with($firstNonEmpty, 'ppn')
+                    || str_starts_with($firstNonEmpty, 'grand total')
+                    || str_starts_with($firstNonEmpty, 'terbilang')
+                    || str_contains($firstNonEmpty, 'info pembayaran')) {
+                    continue;
+                }
+
                 $row = array_combine($header, array_pad($data, count($header), ''));
                 $normalized = $this->mapNormalizedFields($row);
+
+                $resi = strtoupper(trim((string) $normalized['no_resi_awb']));
+                if (in_array($resi, ['TOTAL', 'GRAND TOTAL', 'SUBTOTAL', 'PPN', 'TERBILANG'], true) || str_starts_with($resi, 'INFO PEMBAYARAN')) {
+                    continue;
+                }
 
                 if ($normalized['no_resi_awb'] !== '' || $normalized['no_sj'] !== '' || $normalized['destination_city'] !== '') {
                     $rows[] = $normalized;
@@ -355,51 +376,101 @@ class FreightReconciliationService
     {
         $sharedStrings = $this->reader->sharedStrings($filePath);
         $sheets = $this->reader->sheets($filePath);
-        $invoiceSheet = null;
+        $invoiceSheets = [];
 
         foreach ($sheets as $sheetPath) {
             if ($this->sheetLooksLikeInvoice($filePath, $sheetPath, $sharedStrings)) {
-                $invoiceSheet = $sheetPath;
-
-                break;
+                $invoiceSheets[] = $sheetPath;
             }
         }
 
-        if ($invoiceSheet === null) {
+        if ($invoiceSheets === []) {
             throw new Exception('Tidak menemukan sheet invoice ekspedisi pada file Excel');
         }
 
-        $headerMap = [];
-        $rows = [];
+        $allRows = [];
 
-        foreach ($this->reader->iterateRows($filePath, $invoiceSheet, $sharedStrings) as $cells) {
-            unset($cells['_row']);
+        foreach ($invoiceSheets as $invoiceSheet) {
+            $headerMap = [];
+            $isNextRowSubheader = false;
 
-            if ($headerMap === []) {
-                $joined = strtolower(implode(' ', $cells));
+            foreach ($this->reader->iterateRows($filePath, $invoiceSheet, $sharedStrings) as $cells) {
+                unset($cells['_row']);
 
-                if ($this->textLooksLikeInvoiceHeader($joined)) {
-                    $headerMap = $this->normalizeHeaderColumns($cells);
+                if ($headerMap === []) {
+                    $joined = strtolower(implode(' ', $cells));
+
+                    if ($this->textLooksLikeInvoiceHeader($joined)) {
+                        $headerMap = $this->normalizeHeaderColumns($cells);
+                        $isNextRowSubheader = true;
+                    }
+
+                    continue;
                 }
 
-                continue;
-            }
+                if ($isNextRowSubheader) {
+                    $isNextRowSubheader = false;
 
-            $mappedRow = [];
+                    $hasDataIndicator = false;
+                    foreach ($cells as $v) {
+                        if (is_numeric($v) && (float) $v > 100) {
+                            $hasDataIndicator = true;
+                            break;
+                        }
+                    }
 
-            foreach ($cells as $column => $value) {
-                $field = $headerMap[$column] ?? $column;
-                $mappedRow[$field] = $value;
-            }
+                    if (! $hasDataIndicator) {
+                        $joined = strtolower(implode(' ', $cells));
+                        if (str_contains($joined, 'penerima') || str_contains($joined, 'kota') || str_contains($joined, 'kg') || str_contains($joined, 'kilo')) {
+                            $subMap = $this->normalizeHeaderColumns($cells);
+                            foreach ($subMap as $col => $name) {
+                                $currentField = $this->fieldForHeader($headerMap[$col] ?? '');
+                                $subField = $this->fieldForHeader($name);
 
-            $normalized = $this->mapNormalizedFields($mappedRow);
+                                if ($currentField === null || ($currentField === 'destination_city' && $subField === 'recipient_name')) {
+                                    $headerMap[$col] = $name;
+                                } elseif ($subField === 'destination_city' && empty($headerMap[$col])) {
+                                    $headerMap[$col] = $name;
+                                }
+                            }
 
-            if ($normalized['no_resi_awb'] !== '' || $normalized['no_sj'] !== '') {
-                $rows[] = $normalized;
+                            continue;
+                        }
+                    }
+                }
+
+                // Lewati baris footer ringkasan tagihan (Total, Ppn, Grand Total, Terbilang, Info Rekening)
+                $firstNonEmpty = strtolower(trim((string) (collect($cells)->first(fn ($val) => trim((string) $val) !== '') ?? '')));
+                if (in_array($firstNonEmpty, ['total', 'grand total', 'sub total', 'subtotal', 'ppn', 'terbilang'], true)
+                    || str_starts_with($firstNonEmpty, 'total')
+                    || str_starts_with($firstNonEmpty, 'ppn')
+                    || str_starts_with($firstNonEmpty, 'grand total')
+                    || str_starts_with($firstNonEmpty, 'terbilang')
+                    || str_contains($firstNonEmpty, 'info pembayaran')) {
+                    continue;
+                }
+
+                $mappedRow = [];
+
+                foreach ($cells as $column => $value) {
+                    $field = $headerMap[$column] ?? $column;
+                    $mappedRow[$field] = $value;
+                }
+
+                $normalized = $this->mapNormalizedFields($mappedRow);
+
+                $resi = strtoupper(trim((string) $normalized['no_resi_awb']));
+                if (in_array($resi, ['TOTAL', 'GRAND TOTAL', 'SUBTOTAL', 'PPN', 'TERBILANG'], true) || str_starts_with($resi, 'INFO PEMBAYARAN')) {
+                    continue;
+                }
+
+                if ($normalized['no_resi_awb'] !== '' || $normalized['no_sj'] !== '') {
+                    $allRows[] = $normalized;
+                }
             }
         }
 
-        return $rows;
+        return $allRows;
     }
 
     /**
@@ -416,7 +487,7 @@ class FreightReconciliationService
                 return true;
             }
 
-            if ($seen >= 15) {
+            if ($seen >= 40) {
                 break;
             }
         }
@@ -434,14 +505,38 @@ class FreightReconciliationService
             return false;
         }
 
-        return str_contains($joined, 'shipment')
+        if (str_contains($joined, 'shipment')
             || str_contains($joined, 'tariff')
             || str_contains($joined, 'tarif')
             || str_contains($joined, 'chargeable')
             || str_contains($joined, 'ongkir')
             || str_contains($joined, 'waybill')
             || (str_contains($joined, 'resi') && str_contains($joined, 'biaya'))
-            || (str_contains($joined, 'tujuan') && str_contains($joined, 'tagihan'));
+            || (str_contains($joined, 'tujuan') && str_contains($joined, 'tagihan'))) {
+            return true;
+        }
+
+        $hasIdentifier = str_contains($joined, 'awb')
+            || str_contains($joined, 'abill')
+            || str_contains($joined, 'waybill')
+            || str_contains($joined, 'resi')
+            || str_contains($joined, 'connote')
+            || str_contains($joined, 'surat jalan')
+            || str_contains($joined, 'no sj')
+            || str_contains($joined, 'nomor sj');
+
+        $hasPricingOrWeight = str_contains($joined, 'harga')
+            || str_contains($joined, 'jumlah')
+            || str_contains($joined, 'biaya')
+            || str_contains($joined, 'tagihan')
+            || str_contains($joined, 'tarif')
+            || str_contains($joined, 'tariff')
+            || str_contains($joined, 'ongkir')
+            || str_contains($joined, 'berat')
+            || str_contains($joined, 'koli')
+            || str_contains($joined, 'colly');
+
+        return $hasIdentifier && $hasPricingOrWeight;
     }
 
     /**
@@ -606,7 +701,7 @@ class FreightReconciliationService
             str_contains($h, 'badan usaha') => 'invoice_badan_usaha',
             str_contains($h, 'reffnote') || str_contains($h, 'reff note') || $h === 'reff' => 'invoice_reff_note',
             $h === 'brand' || str_starts_with($h, 'brand ') => 'invoice_brand',
-            str_contains($h, 'resi') || str_contains($h, 'awb') || str_contains($h, 'shipment') || str_contains($h, 'waybill') || in_array($h, ['cn', 'connote', 'stt'], true) => 'no_resi_awb',
+            str_contains($h, 'resi') || str_contains($h, 'awb') || str_contains($h, 'abill') || str_contains($h, 'shipment') || str_contains($h, 'waybill') || in_array($h, ['cn', 'connote', 'stt'], true) => 'no_resi_awb',
             (bool) preg_match('/\b(nomor|no)\.?\s*sj\b|surat jalan|faktur|^sj$/', $h) => 'no_sj',
             str_contains($h, 'asal') || str_contains($h, 'origin') || str_contains($h, 'depo') => 'origin_depo',
             str_contains($h, 'service') || str_contains($h, 'layanan') => 'service_type',
