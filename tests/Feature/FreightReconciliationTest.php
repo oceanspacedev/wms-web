@@ -838,6 +838,82 @@ class FreightReconciliationTest extends TestCase
         $this->assertSame('880', $shipment->fresh()->no_resi_awb);
     }
 
+    public function test_rax_style_deep_header_with_subheaders_and_awb_variations_are_parsed_correctly(): void
+    {
+        $rows = [
+            ['PT. RESTU ABADI EKSPEDISI'],
+            ['INVOICE'],
+            ['NO. 0000/INV/RAE-BDG/KEU/IX/26'],
+            ['Bandung, 30 September 2026'],
+            ['Nama Customer', '', '', ': CV. COMPLETE SELULAR'],
+            ['Alamat', '', '', ': Jl. Petratean No. 011'],
+            ['Kota Cirebon'],
+            ['NPWP', '', '', ': 31.282.101.0-426.000'],
+            [], [], [], [], [], [], [], [], [], // Empty filler rows up to row 17
+            ['No.', 'AWB', 'TGL', 'PENGIRIM', 'KOTA', 'PENERIMA', 'KOTA', 'KOLI', 'BERAT (Kg)', 'HARGA', 'JUMLAH'],
+            ['', '', '', '', '', '', '', '', '', '1 Kg', 'Kg Minimum'],
+            [1, 'IDY0262121', '2026-09-01', 'CV COMPLETE', 'CIREBON', 'SP JATIBARANG', 'JATIBARANG', 1, 8, 3300, 26400],
+            [2, 'IDY0280754', '2026-09-01', 'CV COMPLETE', 'CIREBON', 'UNBOXING GS', 'JATIBARANG', 1, 3, 3300, 9900],
+            ['Total', '', '', '', '', '', '', '', '', '', 36300],
+            ['Ppn 1,1%', '', '', '', '', '', '', '', '', '', 399.3],
+            ['Grand Total', '', '', '', '', '', '', '', '', '', 36699.3],
+            ['Terbilang : # Tiga Puluh Enam Ribu #'],
+        ];
+
+        $path = $this->invoiceFile($rows);
+
+        try {
+            $service = new FreightReconciliationService;
+            $items = $service->parseInvoiceFile($path);
+
+            $this->assertCount(2, $items);
+            $this->assertSame('IDY0262121', $items[0]['no_resi_awb']);
+            $this->assertSame('2026-09-01', $items[0]['shipment_date']);
+            $this->assertSame('CIREBON', $items[0]['origin_depo']);
+            $this->assertSame('SP JATIBARANG', $items[0]['recipient_name']);
+            $this->assertSame('JATIBARANG', $items[0]['destination_city']);
+            $this->assertSame(8.0, $items[0]['billed_weight']);
+            $this->assertSame(3300.0, $items[0]['billed_rate']);
+            $this->assertSame(26400.0, $items[0]['billed_total']);
+
+            $this->assertSame('IDY0280754', $items[1]['no_resi_awb']);
+            $this->assertSame(9900.0, $items[1]['billed_total']);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_rax_kulinari_awwy_abill_and_destination_subheaders_are_parsed(): void
+    {
+        $rows = [
+            ['PT. RESTU ABADI EKSPEDISI'],
+            ['INVOICE'],
+            [], [], [], [], [], [], [], [], [], [], [], [], [], [], [],
+            ['No.', 'AWWY ABILL', 'TANGGAL', 'PENGIRIM', 'TUJUAN', '', 'COLLY', 'BERAT (Kg)', 'HARGA', 'JUMLAH'],
+            ['', '', '', '', 'PENERIMA', 'KOTA', '', '', 'PER KILO', ''],
+            [1, '956070', '2026-09-04', 'MOMOYO TANGERANG', 'MOMOYO', 'CIREBON', 11, 196, 2000, 392000],
+            ['Total', 392000],
+        ];
+
+        $path = $this->invoiceFile($rows);
+
+        try {
+            $service = new FreightReconciliationService;
+            $items = $service->parseInvoiceFile($path);
+
+            $this->assertCount(1, $items);
+            $this->assertSame('956070', $items[0]['no_resi_awb']);
+            $this->assertSame('2026-09-04', $items[0]['shipment_date']);
+            $this->assertSame('MOMOYO', $items[0]['recipient_name']);
+            $this->assertSame('CIREBON', $items[0]['destination_city']);
+            $this->assertSame(196.0, $items[0]['billed_weight']);
+            $this->assertSame(2000.0, $items[0]['billed_rate']);
+            $this->assertSame(392000.0, $items[0]['billed_total']);
+        } finally {
+            @unlink($path);
+        }
+    }
+
     /**
      * @param  list<list<mixed>>  $rows
      */
