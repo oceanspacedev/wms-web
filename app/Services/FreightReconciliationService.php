@@ -798,7 +798,8 @@ class FreightReconciliationService
     }
 
     /**
-     * Kota tujuan yang dicari di Tarif Kontrak, misal "DEPOK-DEPOK JAWA BARAT" → "DEPOK".
+     * Kota tujuan yang dicari di Tarif Kontrak, misal "DEPOK-DEPOK JAWA BARAT" → "DEPOK"
+     * atau "D-Pekalipan, Cirebon" → "CIREBON", "PEKALIPAN".
      *
      * @param  list<?string>  $values
      * @return list<string>
@@ -809,20 +810,46 @@ class FreightReconciliationService
 
         foreach ($values as $value) {
             $raw = $this->upper($value);
-            $city = $this->upper(explode('-', (string) $value)[0]);
-
-            if ($raw !== '') {
-                $keys[] = $raw;
+            if ($raw === '') {
+                continue;
             }
 
-            if ($city !== '') {
-                // Ejaan apa adanya dulu (Tarif Kontrak 21 Express memakai "JOGYAKARTA"), lalu ejaan bakunya
-                $keys[] = $city;
-                $keys[] = self::DESTINATION_ALIASES[$city] ?? $city;
+            $keys[] = $raw;
+
+            // Bersihkan prefix kode layanan moda seperti "D-" (Darat), "U-" (Udara) dsb
+            $clean = preg_replace('/^[A-Z]{1,2}\s*-\s*/i', '', $raw);
+            if ($clean !== '' && $clean !== $raw) {
+                $keys[] = $clean;
+            }
+
+            $target = $clean !== '' ? $clean : $raw;
+
+            // Pecah berdasarkan koma (mis. "PEKALIPAN, CIREBON" -> "PEKALIPAN", "CIREBON")
+            $commaParts = array_filter(array_map('trim', explode(',', $target)));
+            foreach ($commaParts as $p) {
+                if ($p !== '') {
+                    $keys[] = $p;
+                    $keys[] = self::DESTINATION_ALIASES[$p] ?? $p;
+                }
+            }
+
+            // Pecah berdasarkan strip (mis. "DEPOK-DEPOK JAWA BARAT")
+            $hyphenParts = array_filter(array_map('trim', explode('-', $target)));
+            foreach ($hyphenParts as $p) {
+                if ($p !== '') {
+                    $keys[] = $p;
+                    $keys[] = self::DESTINATION_ALIASES[$p] ?? $p;
+                }
+            }
+
+            // Prioritaskan kota (bagian terakhir setelah koma, misal "Pekalipan, Cirebon" -> Cirebon)
+            if (count($commaParts) > 1) {
+                $last = end($commaParts);
+                array_unshift($keys, self::DESTINATION_ALIASES[$last] ?? $last);
             }
         }
 
-        return array_values(array_unique($keys));
+        return array_values(array_unique(array_filter($keys)));
     }
 
     /**
@@ -859,6 +886,8 @@ class FreightReconciliationService
             }
 
             $lookup[$resi] = true;
+            $lookup['`'.$resi] = true;
+            $lookup["'".$resi] = true;
             $lookup[strtoupper($resi)] = true;
             $lookup[strtolower($resi)] = true;
         }
@@ -878,7 +907,7 @@ class FreightReconciliationService
                 ]);
 
             foreach ($rows as $row) {
-                $key = $this->upper($row->no_resi_awb);
+                $key = $this->upper($this->reader->normalizeIdentifier($row->no_resi_awb));
                 if ($this->isValidIdentifier($key)) {
                     $grouped[$key][] = $row;
                 }
