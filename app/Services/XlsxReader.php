@@ -165,7 +165,7 @@ class XlsxReader
 
     public function normalizeIdentifier(string $value): string
     {
-        $value = trim($value);
+        $value = trim($value, " \t\n\r\0\x0B'`\x60");
 
         if ($value === '' || $value === '-') {
             return '';

@@ -914,6 +914,75 @@ class FreightReconciliationTest extends TestCase
         }
     }
 
+    public function test_sentral_cargo_prefixed_destination_and_backtick_resi_are_matched_correctly(): void
+    {
+        $sentral = Expedition::firstOrCreate(
+            ['code' => 'SENTRALCAR'],
+            ['name' => 'SENTRAL CARGO', 'is_active' => true]
+        );
+
+        ExpeditionRateCard::create([
+            'expedition_id' => $sentral->id,
+            'origin_depo' => 'PURWOKERTO',
+            'destination_city' => 'CIREBON',
+            'destination_district' => 'CIREBON',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 4000,
+            'min_kg' => 10,
+            'is_active' => true,
+        ]);
+
+        $shipment = CsaShipment::create([
+            'source' => CsaShipment::SOURCE_SPREADSHEET,
+            'kode_gudang' => 'PWK',
+            'nama_gudang' => 'PURWOKERTO',
+            'target_sheet' => 'PURWOKERTO',
+            'no_sj' => '2610000010',
+            'no_resi_awb' => '`00740201326', // Stored with Excel backtick prefix in warehouse
+            'nama_kota' => 'CIREBON',
+            'tanggal_kirim' => '2026-10-09',
+            'badan_usaha' => 'CV. TOP SELULAR',
+            'tujuan_dealer' => 'CV TOP SELULAR CIREBON',
+            'nama_ekspedisi' => 'SENTRAL CARGO',
+            'berat' => 25.0,
+            'qty_koli' => 5,
+        ]);
+
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $sentral->id,
+            'invoice_number' => 'INV-SENTRAL-TEST',
+            'invoice_date' => '2026-10-31',
+            'origin_city' => 'PURWOKERTO',
+            'status' => 'processing',
+        ]);
+
+        $service = new FreightReconciliationService;
+        $result = $service->reconcile($invoice, [[
+            'no_resi_awb' => '00740201326', // Clean resi from invoice
+            'no_sj' => '',
+            'shipment_date' => '2026-10-16',
+            'origin_depo' => 'Purwokerto',
+            'destination_city' => 'D-Pekalipan, Cirebon',
+            'recipient_name' => 'CV TOP CIREBON',
+            'billed_weight' => 25.0,
+            'billed_rate' => 4000.0,
+            'billed_insurance' => 196300.0,
+            'billed_total' => 296300.0,
+        ]]);
+
+        $item = $result->items->sole();
+
+        // 1. Tarif cocok ke CIREBON
+        $this->assertSame('matched', $item->audit_status);
+        $this->assertSame(4000.0, (float) $item->agreed_rate);
+        $this->assertSame(0.0, (float) $item->discrepancy_amount);
+
+        // 2. Terhubung ke data pengiriman gudang meskipun di database ada awalan backtick
+        $this->assertSame($shipment->id, $item->csa_shipment_id);
+        $this->assertSame('matched', $item->shipment_match_status);
+        $this->assertSame('2610000010', $item->no_sj);
+    }
+
     /**
      * @param  list<list<mixed>>  $rows
      */

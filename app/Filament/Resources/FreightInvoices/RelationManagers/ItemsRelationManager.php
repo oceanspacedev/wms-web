@@ -63,7 +63,9 @@ class ItemsRelationManager extends RelationManager
                 TextColumn::make('destination_city')
                     ->label('Rute')
                     ->formatStateUsing(function (?string $state, FreightInvoiceItem $record): string {
-                        $destination = trim(explode('-', (string) $state)[0]) ?: '-';
+                        $clean = preg_replace('/^[A-Z]{1,2}\s*-\s*/i', '', (string) $state);
+                        $parts = array_filter(array_map('trim', preg_split('/[,-\/]+/', $clean)));
+                        $destination = end($parts) ?: ($record->destination_city ?: '-');
 
                         return ($record->origin_depo ?: '-').' → '.str($destination)->limit(18);
                     })
