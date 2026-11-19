@@ -2,12 +2,17 @@
 
 namespace App\Services;
 
+use App\Models\CsaShipment;
+use App\Models\Expedition;
 use App\Models\ExpeditionRateCard;
 use App\Models\FreightInvoice;
 use App\Models\FreightInvoiceItem;
 use App\Support\Rupiah;
+use Carbon\Carbon;
 use Exception;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class FreightReconciliationService
 {
@@ -23,6 +28,15 @@ class FreightReconciliationService
         // Nama lama Makassar yang masih dipakai invoice 21 Express
         'UJUNG PANDANG' => 'MAKASSAR',
         'UJUNGPANDANG' => 'MAKASSAR',
+    ];
+
+    /**
+     * Nilai placeholder pada kolom resi/SJ yang tidak boleh dipakai sebagai kunci pencocokan Data Pengiriman.
+     *
+     * @var list<string>
+     */
+    private const PLACEHOLDER_IDENTIFIERS = [
+        '', '-', '0', 'MANUAL', 'DOKUMEN', 'DOKUEMN', 'BATCH 1', 'BATCH 2', 'BATCH1', 'BATCH2', 'N/A', 'NA', 'NULL', 'NAN',
     ];
 
     public function __construct(private XlsxReader $reader = new XlsxReader) {}
@@ -44,6 +58,12 @@ class FreightReconciliationService
 
             $rateCards = $this->rateCardIndex($invoice->expedition_id);
             $origins = collect($rateCards)->flatten()->map(fn (ExpeditionRateCard $card): string => $this->upper($card->origin_depo))->unique()->values()->all();
+            $expedition = $invoice->expedition;
+
+            // Pre-load Data Pengiriman (csa_shipments) dalam batch query untuk pencocokan resi, SJ, & smart fallback
+            $shipmentsByResi = $this->loadShipmentsByResi($rawItems);
+            $shipmentsBySj = $this->loadShipmentsBySj($rawItems);
+            $fallbackShipments = $this->loadFallbackShipments($rawItems, $invoice, $origins);
 
             // Pre-load previously approved resi numbers to catch duplicate invoicing
             $previousResi = FreightInvoiceItem::where('freight_invoice_id', '!=', $invoice->id)
@@ -77,9 +97,10 @@ class FreightReconciliationService
                 $actualWeight = $grossWeight > 0 ? $grossWeight : null;
                 $expectedTotal = $billedTotal;
                 $agreedRate = 0.0;
+                $matchedMinKg = 1.0;
                 $originDepo = $this->resolveOrigin([$item['origin_depo'] ?? '', $invoice->origin_city], $origins);
 
-                // 1. DUPLICATE CHECK
+                // 1. DUPLICATE CHECK & CEK TARIF KONTRAK
                 if (! empty($noResi) && isset($previousResi[$noResi])) {
                     $auditStatus = 'duplicate';
                     $auditNotes[] = "Resi sudah pernah ditagihkan pada Faktur #{$previousResi[$noResi]}";
@@ -91,6 +112,7 @@ class FreightReconciliationService
 
                     if ($rateCard) {
                         $agreedRate = (float) $rateCard->rate_per_kg;
+                        $matchedMinKg = max(1.0, (float) $rateCard->min_kg);
                         $hasRateIssue = $billedRate > 0 && $billedRate > $agreedRate + 0.5;
                         $hasWeightIssue = false;
                         $chargeWeight = $billedWeight;
@@ -128,6 +150,7 @@ class FreightReconciliationService
                         && ($darat = $this->findRateCard($rateCards, $originDepo, $destinations, 'DARAT'))) {
                         // Layanan yang ditagih (mis. ECO/UDARA) belum ada tarifnya: bandingkan dengan tarif DARAT rute yang sama
                         $agreedRate = (float) $darat->rate_per_kg;
+                        $matchedMinKg = max(1.0, (float) $darat->min_kg);
                         $daratWeight = max($grossWeight > 0 ? ceil(round($grossWeight, 2)) : $billedWeight, (float) $darat->min_kg);
                         $daratCost = round($daratWeight * $agreedRate, 2);
 
@@ -148,20 +171,79 @@ class FreightReconciliationService
                     }
                 }
 
+                // 2. COCOKKAN KE DATA PENGIRIMAN (Update Pengiriman All Depo / csa_shipments)
+                $resolvedOrigin = $originDepo ?? (($item['origin_depo'] ?? '') ?: ($invoice->origin_city ?: null));
+                $shipmentMatch = $this->matchAndSummarizeShipment(
+                    noResi: $noResi,
+                    noSj: $noSj,
+                    originDepo: $resolvedOrigin,
+                    item: $item,
+                    expedition: $expedition,
+                    shipmentsByResi: $shipmentsByResi,
+                    shipmentsBySj: $shipmentsBySj,
+                    fallbackShipments: $fallbackShipments,
+                );
+
+                $shipmentMatchStatus = 'unmatched';
+                $shipmentMatchedBy = $shipmentMatch['matched_by'];
+                $shipmentWeight = $shipmentMatch['weight'];
+
+                if ($shipmentMatch['csa_shipment_id'] !== null) {
+                    $hasExpeditionIssue = false;
+                    $warehouseExp = trim((string) ($shipmentMatch['nama_ekspedisi'] ?? ''));
+
+                    if ($expedition !== null && $warehouseExp !== '' && ! $this->expeditionMatches($expedition, $warehouseExp)) {
+                        $hasExpeditionIssue = true;
+                    }
+
+                    if ($hasExpeditionIssue) {
+                        $shipmentMatchStatus = 'expedition_mismatch';
+                        $auditNotes[] = "Beda Ekspedisi: tagihan {$expedition->name} vs data gudang {$warehouseExp}";
+                    } elseif ($shipmentWeight !== null && $shipmentWeight > 0) {
+                        $expectedWarehouseWeight = max(ceil(round($shipmentWeight, 2)), $matchedMinKg);
+
+                        if ($billedWeight > $expectedWarehouseWeight + 0.5) {
+                            $shipmentMatchStatus = 'weight_mismatch';
+                            $auditNotes[] = "Berat vs Data Pengiriman: ditagih {$this->kg($billedWeight)} kg vs gudang {$this->kg($shipmentWeight)} kg";
+                        } else {
+                            $shipmentMatchStatus = 'matched';
+                        }
+                    } else {
+                        $shipmentMatchStatus = 'matched';
+                    }
+
+                    if ($shipmentMatchedBy === 'dealer_date' && filled($shipmentMatch['tujuan_dealer'])) {
+                        $auditNotes[] = "Cocok via Toko [{$shipmentMatch['tujuan_dealer']}]";
+                    }
+                }
+
+                $finalNoSj = $shipmentMatch['no_sj'] ?: ($noSj ?: null);
+                $finalBadanUsaha = $shipmentMatch['badan_usaha'] ?: (($item['invoice_badan_usaha'] ?? '') ?: null);
+                $finalReffNote = $shipmentMatch['reff_note'] ?: (($item['invoice_reff_note'] ?? '') ?: null);
+                $finalBrand = $shipmentMatch['brand'] ?: (($item['invoice_brand'] ?? '') ?: null);
+                $finalNominalSj = $shipmentMatch['nominal_sj'] > 0
+                    ? $shipmentMatch['nominal_sj']
+                    : (float) ($item['invoice_nominal_sj'] ?? 0.0);
+
                 $discrepancyAmount = $auditStatus === 'missing_rate' ? 0.0 : round(max(0, $billedTotal - $expectedTotal), 2);
                 $resiKey = $noResi ?: ($noSj ?: '-');
                 $manual = $manualApprovals->get($resiKey);
 
                 $itemsToInsert[] = [
                     'freight_invoice_id' => $invoice->id,
-                    'csa_shipment_id' => null,
+                    'csa_shipment_id' => $shipmentMatch['csa_shipment_id'],
                     'no_resi_awb' => $resiKey,
-                    'no_sj' => $noSj ?: null,
+                    'no_sj' => $finalNoSj,
+                    'shipment_badan_usaha' => $finalBadanUsaha,
+                    'shipment_reff_note' => $finalReffNote,
+                    'shipment_brand' => $finalBrand,
+                    'shipment_nominal_sj' => $finalNominalSj,
                     'origin_depo' => $originDepo ?? (($item['origin_depo'] ?? '') ?: null),
                     'destination_city' => ($item['destination_city'] ?? '') ?: null,
                     'service_type' => $billedService ?: null,
                     'billed_weight' => $billedWeight,
                     'actual_weight' => $actualWeight,
+                    'shipment_weight' => $shipmentWeight,
                     'weight_discrepancy' => $actualWeight !== null ? round($billedWeight - $actualWeight, 2) : 0.0,
                     'billed_rate' => $billedRate,
                     'agreed_rate' => $agreedRate,
@@ -171,6 +253,8 @@ class FreightReconciliationService
                     'expected_total' => $expectedTotal,
                     'discrepancy_amount' => $discrepancyAmount,
                     'audit_status' => $auditStatus,
+                    'shipment_match_status' => $shipmentMatchStatus,
+                    'shipment_matched_by' => $shipmentMatchedBy,
                     'audit_notes' => implode(' | ', $auditNotes),
                     'manual_approved_amount' => $manual?->manual_approved_amount,
                     'manual_note' => $manual?->manual_note,
@@ -415,6 +499,8 @@ class FreightReconciliationService
         $res = [
             'no_resi_awb' => '',
             'no_sj' => '',
+            'shipment_date' => null,
+            'recipient_name' => '',
             'origin_depo' => '',
             'destination_city' => '',
             'service_type' => '',
@@ -423,6 +509,10 @@ class FreightReconciliationService
             'billed_rate' => 0.0,
             'billed_insurance' => 0.0,
             'billed_total' => 0.0,
+            'invoice_badan_usaha' => '',
+            'invoice_reff_note' => '',
+            'invoice_brand' => '',
+            'invoice_nominal_sj' => 0.0,
         ];
 
         $filled = [];
@@ -447,8 +537,10 @@ class FreightReconciliationService
             $filled[$field] = true;
             $res[$field] = match ($field) {
                 'no_resi_awb', 'no_sj' => $this->reader->normalizeIdentifier($v),
+                'shipment_date' => $this->parseDateValue($v),
+                'recipient_name' => strtoupper($v),
                 'gross_weight', 'billed_weight' => (float) str_replace(',', '.', $v),
-                'billed_rate', 'billed_insurance', 'billed_total' => Rupiah::parse($v),
+                'billed_rate', 'billed_insurance', 'billed_total', 'invoice_nominal_sj' => Rupiah::parse($v),
                 default => $v,
             };
         }
@@ -463,6 +555,38 @@ class FreightReconciliationService
     }
 
     /**
+     * Parse date value from Excel/CSV (serial number or various string date formats) into Y-m-d.
+     */
+    protected function parseDateValue(mixed $val): ?string
+    {
+        if (blank($val)) {
+            return null;
+        }
+
+        if (is_numeric($val) && (float) $val > 20000 && (float) $val < 80000) {
+            try {
+                return Carbon::instance(Date::excelToDateTimeObject((float) $val))->toDateString();
+            } catch (\Throwable) {
+            }
+        }
+
+        $str = trim((string) $val);
+
+        foreach (['Y-m-d', 'd.m.Y', 'd/m/Y', 'd-m-Y', 'Y/m/d', 'j-M-y', 'd-M-y', 'd M Y', 'd F Y'] as $fmt) {
+            try {
+                return Carbon::createFromFormat($fmt, $str)->toDateString();
+            } catch (\Throwable) {
+            }
+        }
+
+        try {
+            return Carbon::parse($str)->toDateString();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Kolom invoice ekspedisi => field rekonsiliasi. Urutan pengecekan penting: "Tariff Total" adalah total,
      * bukan tarif per kg; "CEK TARIF" dan keterangan adalah catatan admin, bukan data tagihan.
      */
@@ -474,7 +598,14 @@ class FreightReconciliationService
             || str_contains($h, '(kg)') || $h === 'kg';
 
         return match (true) {
-            $h === '' || str_contains($h, 'cek') || str_contains($h, 'ket') || str_contains($h, 'nominal') => null,
+            $h === '' || str_contains($h, 'cek') || str_contains($h, 'ket') => null,
+            str_contains($h, 'tanggal') || str_contains($h, 'tgl') || $h === 'date' => 'shipment_date',
+            str_contains($h, 'penerima') || str_contains($h, 'receiver') || str_contains($h, 'dealer') || str_contains($h, 'toko') || str_contains($h, 'consignee') => 'recipient_name',
+            str_contains($h, 'pengirim') || str_contains($h, 'sender') => 'invoice_badan_usaha',
+            str_contains($h, 'nominal') || $h === 'ammount' || $h === 'amount' => 'invoice_nominal_sj',
+            str_contains($h, 'badan usaha') => 'invoice_badan_usaha',
+            str_contains($h, 'reffnote') || str_contains($h, 'reff note') || $h === 'reff' => 'invoice_reff_note',
+            $h === 'brand' || str_starts_with($h, 'brand ') => 'invoice_brand',
             str_contains($h, 'resi') || str_contains($h, 'awb') || str_contains($h, 'shipment') || str_contains($h, 'waybill') || in_array($h, ['cn', 'connote', 'stt'], true) => 'no_resi_awb',
             (bool) preg_match('/\b(nomor|no)\.?\s*sj\b|surat jalan|faktur|^sj$/', $h) => 'no_sj',
             str_contains($h, 'asal') || str_contains($h, 'origin') || str_contains($h, 'depo') => 'origin_depo',
@@ -613,6 +744,554 @@ class FreightReconciliationService
             str_contains($s, 'LAUT') || str_contains($s, 'SEA') || str_contains($s, 'KAPAL') => 'LAUT',
             default => 'DARAT',
         };
+    }
+
+    /**
+     * Pre-load Data Pengiriman berdasarkan No. Resi / AWB (kunci utama pencocokan).
+     *
+     * @param  array<int, array<string, mixed>>  $rawItems
+     * @return array<string, list<CsaShipment>>
+     */
+    protected function loadShipmentsByResi(array $rawItems): array
+    {
+        $lookup = [];
+
+        foreach ($rawItems as $item) {
+            $resi = $this->reader->normalizeIdentifier((string) ($item['no_resi_awb'] ?? ''));
+
+            if (! $this->isValidIdentifier($resi)) {
+                continue;
+            }
+
+            $lookup[$resi] = true;
+            $lookup[strtoupper($resi)] = true;
+            $lookup[strtolower($resi)] = true;
+        }
+
+        if ($lookup === []) {
+            return [];
+        }
+
+        $grouped = [];
+
+        foreach (array_chunk(array_keys($lookup), 500) as $chunk) {
+            $rows = CsaShipment::query()
+                ->whereIn('no_resi_awb', $chunk)
+                ->get([
+                    'id', 'no_resi_awb', 'no_sj', 'badan_usaha', 'reff_note', 'brand',
+                    'total_nominal_sj', 'berat', 'qty_koli', 'nama_ekspedisi', 'target_sheet', 'nama_gudang',
+                ]);
+
+            foreach ($rows as $row) {
+                $key = $this->upper($row->no_resi_awb);
+                if ($this->isValidIdentifier($key)) {
+                    $grouped[$key][] = $row;
+                }
+            }
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Pre-load Data Pengiriman berdasarkan Nomor SJ (kunci cadangan bila No. Resi belum diinput di Data Pengiriman).
+     *
+     * @param  array<int, array<string, mixed>>  $rawItems
+     * @return array<string, list<CsaShipment>>
+     */
+    protected function loadShipmentsBySj(array $rawItems): array
+    {
+        $lookup = [];
+
+        foreach ($rawItems as $item) {
+            foreach ($this->splitIdentifiers((string) ($item['no_sj'] ?? '')) as $sj) {
+                $lookup[$sj] = true;
+                $lookup[strtoupper($sj)] = true;
+            }
+        }
+
+        if ($lookup === []) {
+            return [];
+        }
+
+        $grouped = [];
+
+        foreach (array_chunk(array_keys($lookup), 500) as $chunk) {
+            $rows = CsaShipment::query()
+                ->whereIn('no_sj', $chunk)
+                ->get([
+                    'id', 'no_resi_awb', 'no_sj', 'badan_usaha', 'reff_note', 'brand',
+                    'total_nominal_sj', 'berat', 'qty_koli', 'nama_ekspedisi', 'target_sheet', 'nama_gudang',
+                ]);
+
+            foreach ($rows as $row) {
+                $key = $this->upper($row->no_sj);
+                if ($this->isValidIdentifier($key)) {
+                    $grouped[$key][] = $row;
+                }
+            }
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Pre-load Data Pengiriman untuk Smart Fallback (pencocokan tanggal + toko + kota)
+     * saat nomor resi dan nomor SJ keduanya tidak cocok atau tidak tersedia di invoice.
+     *
+     * @param  array<int, array<string, mixed>>  $rawItems
+     * @param  list<string>  $origins
+     * @return Collection<int, CsaShipment>
+     */
+    protected function loadFallbackShipments(array $rawItems, FreightInvoice $invoice, array $origins): Collection
+    {
+        $dates = collect($rawItems)
+            ->pluck('shipment_date')
+            ->filter()
+            ->values();
+
+        if ($dates->isEmpty()) {
+            return collect();
+        }
+
+        $minDate = Carbon::parse($dates->min())->subDays(3)->toDateString();
+        $maxDate = Carbon::parse($dates->max())->addDays(3)->toDateString();
+
+        $origin = $invoice->origin_city ?: ($origins[0] ?? null);
+
+        $query = CsaShipment::query()
+            ->whereBetween('tanggal_kirim', [$minDate.' 00:00:00', $maxDate.' 23:59:59'])
+            ->whereNotNull('tujuan_dealer')
+            ->where('tujuan_dealer', '!=', '');
+
+        if ($origin !== null && $origin !== '') {
+            $upperOrigin = strtoupper(trim($origin));
+            $query->where(function ($q) use ($upperOrigin) {
+                $q->where('target_sheet', $upperOrigin)
+                    ->orWhere('nama_gudang', $upperOrigin)
+                    ->orWhere('reff_note', 'LIKE', "%{$upperOrigin}%");
+            });
+        }
+
+        return $query->get([
+            'id', 'no_resi_awb', 'no_sj', 'badan_usaha', 'reff_note', 'brand',
+            'tujuan_dealer', 'nama_kota', 'tanggal_kirim', 'total_nominal_sj',
+            'berat', 'qty_koli', 'nama_ekspedisi', 'target_sheet', 'nama_gudang',
+        ]);
+    }
+
+    /**
+     * Cocokkan baris invoice ke Data Pengiriman berdasarkan kombinasi:
+     * Tanggal Kirim (+/- 2 hari) + Kesamaan Nama Toko/Dealer + Kesamaan Kota Tujuan.
+     *
+     * @param  array<string, mixed>  $item
+     * @param  Collection<int, CsaShipment>  $fallbackShipments
+     */
+    protected function matchByDealerAndDate(
+        array $item,
+        ?string $originDepo,
+        ?Expedition $expedition,
+        Collection $fallbackShipments
+    ): ?CsaShipment {
+        $itemDate = $item['shipment_date'] ?? null;
+        $recipientName = strtoupper(trim((string) ($item['recipient_name'] ?? '')));
+        $destinationCity = strtoupper(trim((string) ($item['destination_city'] ?? '')));
+
+        if ($itemDate === null || $recipientName === '') {
+            return null;
+        }
+
+        // Singkirkan kata-kata umum badan usaha/toko agar pencarian fokus pada nama unik dealer
+        $stopWords = ['CV', 'PT', 'UD', 'TOKO', 'CELL', 'SELULAR', 'CELLULAR', 'ACCESSORIES', 'ACC', 'STORE', 'SHOP', 'JAYA', 'ABADI', 'BARU', 'KEC', 'KAB', 'DESA'];
+        $words = array_values(array_filter(
+            preg_split('/[\s,\.\-]+/', $recipientName) ?: [],
+            fn (string $w): bool => strlen($w) >= 3 && ! in_array($w, $stopWords, true),
+        ));
+
+        if ($words === [] && strlen($recipientName) < 3) {
+            return null;
+        }
+
+        $bestCandidate = null;
+        $bestScore = 0;
+
+        foreach ($fallbackShipments as $cand) {
+            if ($cand->tanggal_kirim === null) {
+                continue;
+            }
+
+            $candDate = Carbon::parse($cand->tanggal_kirim)->toDateString();
+            $diffDays = abs(Carbon::parse($candDate)->diffInDays(Carbon::parse($itemDate), false));
+
+            // Maksimal selisih 2 hari kalender
+            if ($diffDays > 2) {
+                continue;
+            }
+
+            // Jika ekspedisi pada data pengiriman sudah terisi, pastikan kompatibel
+            if ($expedition !== null && filled($cand->nama_ekspedisi) && ! $this->expeditionMatches($expedition, $cand->nama_ekspedisi)) {
+                continue;
+            }
+
+            $candDealer = strtoupper(trim((string) $cand->tujuan_dealer));
+            $candCity = strtoupper(trim((string) $cand->nama_kota));
+
+            $score = 0;
+
+            // 1. Bonus kecocokan kota tujuan
+            if ($destinationCity !== '' && $candCity !== '') {
+                if (str_contains($candCity, $destinationCity) || str_contains($destinationCity, $candCity)) {
+                    $score += 15;
+                }
+            }
+
+            // 2. Kecocokan token nama toko unik
+            foreach ($words as $w) {
+                if (str_contains($candDealer, $w)) {
+                    $score += 10;
+                }
+            }
+
+            // 3. Kecocokan nama penerima penuh (substring)
+            if (strlen($recipientName) >= 4 && str_contains($candDealer, $recipientName)) {
+                $score += 20;
+            }
+
+            // 4. Bonus tanggal persis sama
+            if ($candDate === $itemDate) {
+                $score += 10;
+            } elseif ($diffDays <= 1) {
+                $score += 5;
+            }
+
+            // Ambang batas: minimal ada kecocokan nama toko (10) + kota/tanggal (15) = 25
+            if ($score >= 25 && $score > $bestScore) {
+                $bestScore = $score;
+                $bestCandidate = $cand;
+            }
+        }
+
+        return $bestCandidate;
+    }
+
+    /**
+     * Cocokkan satu baris invoice ke Data Pengiriman (prioritas No. Resi, lalu fallback No. SJ yang terverifikasi konteksnya,
+     * dan smart fallback tanggal + toko + kota jika resi/SJ tidak cocok) dan gabungkan field Badan Usaha, Reffnote, Brand,
+     * No. SJ, Total Nominal SJ, serta Berat Gudang.
+     *
+     * @param  array<string, mixed>  $item
+     * @param  array<string, list<CsaShipment>>  $shipmentsByResi
+     * @param  array<string, list<CsaShipment>>  $shipmentsBySj
+     * @param  Collection<int, CsaShipment>|null  $fallbackShipments
+     * @return array{
+     *     csa_shipment_id: ?int,
+     *     matched_by: ?string,
+     *     nama_ekspedisi: ?string,
+     *     no_sj: ?string,
+     *     badan_usaha: ?string,
+     *     reff_note: ?string,
+     *     brand: ?string,
+     *     tujuan_dealer: ?string,
+     *     nominal_sj: float,
+     *     weight: ?float,
+     * }
+     */
+    protected function matchAndSummarizeShipment(
+        string $noResi,
+        string $noSj,
+        ?string $originDepo,
+        array $item,
+        ?Expedition $expedition,
+        array $shipmentsByResi,
+        array $shipmentsBySj,
+        ?Collection $fallbackShipments = null,
+    ): array {
+        $empty = [
+            'csa_shipment_id' => null,
+            'matched_by' => null,
+            'nama_ekspedisi' => null,
+            'no_sj' => null,
+            'badan_usaha' => null,
+            'reff_note' => null,
+            'brand' => null,
+            'tujuan_dealer' => null,
+            'nominal_sj' => 0.0,
+            'weight' => null,
+        ];
+
+        $matchedBy = null;
+        $candidates = [];
+
+        // 1. Kunci utama: No. Resi / AWB
+        $resiKey = $this->upper($noResi);
+        if ($this->isValidIdentifier($resiKey) && isset($shipmentsByResi[$resiKey])) {
+            $candidates = $shipmentsByResi[$resiKey];
+
+            // Jika nomor resi pendek bentrok antar ekspedisi, prioritaskan yang ekspedisinya cocok
+            if ($expedition !== null && count($candidates) > 1) {
+                $byExp = array_values(array_filter(
+                    $candidates,
+                    fn (CsaShipment $s): bool => $this->expeditionMatches($expedition, $s->nama_ekspedisi),
+                ));
+
+                if ($byExp !== []) {
+                    $candidates = $byExp;
+                }
+            }
+
+            if ($originDepo !== null && count($candidates) > 1) {
+                $byOrigin = array_values(array_filter(
+                    $candidates,
+                    fn (CsaShipment $s): bool => $this->shipmentMatchesOrigin($originDepo, $s),
+                ));
+
+                if ($byOrigin !== []) {
+                    $candidates = $byOrigin;
+                }
+            }
+
+            $matchedBy = 'resi';
+        }
+
+        // 2. Fallback: No. SJ (wajib terverifikasi konteks depo/badan usaha/brand/ekspedisi agar tidak tertukar antar depo)
+        if ($candidates === []) {
+            $sjTokens = $this->splitIdentifiers($noSj);
+            $sjCandidates = [];
+
+            foreach ($sjTokens as $token) {
+                $key = $this->upper($token);
+                if (isset($shipmentsBySj[$key])) {
+                    foreach ($shipmentsBySj[$key] as $row) {
+                        $sjCandidates[$row->id] = $row;
+                    }
+                }
+            }
+
+            $sjCandidates = array_values($sjCandidates);
+
+            if ($sjCandidates !== []) {
+                $contextual = array_values(array_filter(
+                    $sjCandidates,
+                    fn (CsaShipment $s): bool => $this->shipmentMatchesContext($s, $originDepo, $item, $expedition),
+                ));
+
+                $hasContextClues = filled($originDepo)
+                    || filled($item['invoice_badan_usaha'] ?? '')
+                    || filled($item['invoice_brand'] ?? '')
+                    || filled($item['invoice_reff_note'] ?? '');
+
+                if ($contextual !== []) {
+                    $candidates = $contextual;
+                    $matchedBy = 'sj';
+                } elseif (! $hasContextClues && count($sjCandidates) === 1) {
+                    $candidates = $sjCandidates;
+                    $matchedBy = 'sj';
+                }
+            }
+        }
+
+        // 3. Smart Fallback: Tanggal Kirim + Nama Toko/Penerima + Kota Tujuan
+        if ($candidates === [] && $fallbackShipments !== null && $fallbackShipments->isNotEmpty()) {
+            $fallback = $this->matchByDealerAndDate($item, $originDepo, $expedition, $fallbackShipments);
+            if ($fallback !== null) {
+                $candidates = [$fallback];
+                $matchedBy = 'dealer_date';
+            }
+        }
+
+        if ($candidates === []) {
+            return $empty;
+        }
+
+        $deduped = $this->deduplicateShipments($candidates);
+        $first = $deduped[0];
+
+        // Backfill No. Resi ke Data Pengiriman jika belum ada dan nomor resi invoice valid
+        if ($matchedBy === 'dealer_date' && ! $this->isValidIdentifier((string) $first->no_resi_awb) && $this->isValidIdentifier($noResi)) {
+            $first->update(['no_resi_awb' => $noResi]);
+        }
+
+        $sjs = [];
+        $badanUsaha = [];
+        $reffNotes = [];
+        $brands = [];
+        $nominalSum = 0.0;
+        $weightSum = 0.0;
+        $hasWeight = false;
+
+        foreach ($deduped as $shipment) {
+            $sjVal = trim((string) $shipment->no_sj);
+            if ($this->isValidIdentifier($sjVal)) {
+                $sjs[] = $sjVal;
+            }
+
+            $bu = trim((string) $shipment->badan_usaha);
+            if ($bu !== '') {
+                $badanUsaha[] = $bu;
+            }
+
+            $reff = trim((string) $shipment->reff_note);
+            if ($reff !== '') {
+                $reffNotes[] = $reff;
+            }
+
+            $brand = trim((string) $shipment->brand);
+            if ($brand !== '') {
+                $brands[] = $brand;
+            }
+
+            $nominalSum += (float) $shipment->total_nominal_sj;
+
+            if ((float) $shipment->berat > 0) {
+                $weightSum += (float) $shipment->berat;
+                $hasWeight = true;
+            }
+        }
+
+        return [
+            'csa_shipment_id' => $first->id,
+            'matched_by' => $matchedBy,
+            'nama_ekspedisi' => $first->nama_ekspedisi,
+            'no_sj' => $sjs !== [] ? implode(', ', array_values(array_unique($sjs))) : null,
+            'badan_usaha' => $badanUsaha !== [] ? implode(', ', array_values(array_unique($badanUsaha))) : null,
+            'reff_note' => $reffNotes !== [] ? implode(', ', array_values(array_unique($reffNotes))) : null,
+            'brand' => $brands !== [] ? implode(', ', array_values(array_unique($brands))) : null,
+            'tujuan_dealer' => $first->tujuan_dealer ?: null,
+            'nominal_sj' => round($nominalSum, 2),
+            'weight' => $hasWeight ? round($weightSum, 2) : null,
+        ];
+    }
+
+    /**
+     * Buang baris duplikat identik dari import spreadsheet lama agar berat & nominal tidak terhitung ganda.
+     *
+     * @param  list<CsaShipment>  $shipments
+     * @return list<CsaShipment>
+     */
+    protected function deduplicateShipments(array $shipments): array
+    {
+        $unique = [];
+
+        foreach ($shipments as $s) {
+            $fingerprint = implode('|', [
+                $this->upper($s->no_sj),
+                $this->upper($s->badan_usaha),
+                $this->upper($s->reff_note),
+                $this->upper($s->brand),
+                number_format((float) $s->berat, 2, '.', ''),
+                number_format((float) $s->total_nominal_sj, 2, '.', ''),
+            ]);
+
+            $unique[$fingerprint] ??= $s;
+        }
+
+        return array_values($unique);
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    protected function shipmentMatchesContext(CsaShipment $shipment, ?string $originDepo, array $item, ?Expedition $expedition): bool
+    {
+        if ($originDepo !== null && $this->shipmentMatchesOrigin($originDepo, $shipment)) {
+            return true;
+        }
+
+        $invBu = $this->normalizeAlnum((string) ($item['invoice_badan_usaha'] ?? ''));
+        $shipBu = $this->normalizeAlnum((string) $shipment->badan_usaha);
+        if ($invBu !== '' && $shipBu !== '' && (str_contains($shipBu, $invBu) || str_contains($invBu, $shipBu))) {
+            return true;
+        }
+
+        $invReff = $this->normalizeAlnum((string) ($item['invoice_reff_note'] ?? ''));
+        $shipReff = $this->normalizeAlnum((string) $shipment->reff_note);
+        if ($invReff !== '' && $shipReff !== '' && (str_contains($shipReff, $invReff) || str_contains($invReff, $shipReff))) {
+            return true;
+        }
+
+        if ($expedition !== null && $this->expeditionMatches($expedition, $shipment->nama_ekspedisi)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected function shipmentMatchesOrigin(string $originDepo, CsaShipment $shipment): bool
+    {
+        $origin = $this->upper($originDepo);
+        if ($origin === '') {
+            return false;
+        }
+
+        foreach ([$shipment->target_sheet, $shipment->nama_gudang, $shipment->reff_note] as $field) {
+            $val = $this->upper($field);
+            if ($val !== '' && (str_contains($val, $origin) || str_contains($origin, $val))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function expeditionMatches(Expedition $expedition, ?string $shipmentExpedition): bool
+    {
+        $actual = $this->normalizeAlnum((string) $shipmentExpedition);
+        if ($actual === '') {
+            return false;
+        }
+
+        $target = $this->normalizeAlnum($expedition->name.' '.$expedition->code);
+
+        $families = [
+            ['JNT', 'JT', 'JTCARGO'],
+            ['RAX', 'RESTUABADI'],
+            ['21EXPRES', '21EXPRESS'],
+            ['KARYAMANDIRI', 'KARYAMANDI'],
+            ['SENTRALCARGO', 'SENTRALCAR'],
+            ['IDEXPRES', 'IDEXPRESS'],
+            ['SICEPAT'],
+            ['JNE'],
+        ];
+
+        foreach ($families as $tokens) {
+            $targetInFamily = collect($tokens)->contains(fn (string $t): bool => str_contains($target, $t));
+            $actualInFamily = collect($tokens)->contains(fn (string $t): bool => str_contains($actual, $t));
+
+            if ($targetInFamily && $actualInFamily) {
+                return true;
+            }
+        }
+
+        $expName = $this->normalizeAlnum($expedition->name);
+
+        return $expName !== '' && (str_contains($actual, $expName) || str_contains($expName, $actual));
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function splitIdentifiers(string $raw): array
+    {
+        $tokens = [];
+
+        foreach (preg_split('/[\s,;\n\/]+/', $raw) ?: [] as $part) {
+            $clean = trim($part);
+            if ($this->isValidIdentifier($clean) && strlen($clean) >= 4) {
+                $tokens[] = $clean;
+            }
+        }
+
+        return array_values(array_unique($tokens));
+    }
+
+    protected function isValidIdentifier(string $value): bool
+    {
+        return ! in_array($this->upper($value), self::PLACEHOLDER_IDENTIFIERS, true);
+    }
+
+    private function normalizeAlnum(string $value): string
+    {
+        return (string) preg_replace('/[^A-Z0-9]/', '', strtoupper($value));
     }
 
     private function upper(?string $value): string

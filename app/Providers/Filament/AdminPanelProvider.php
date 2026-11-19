@@ -15,6 +15,7 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
@@ -42,6 +43,7 @@ class AdminPanelProvider extends PanelProvider
                     ->sidebarWidth('16rem'),
             )
             ->brandName('WMS')
+            ->maxContentWidth(Width::Full)
             ->viteTheme('resources/css/app.css')
             ->login(Login::class)
             ->profile(EditProfile::class, isSimple: false)

@@ -16,4 +16,12 @@
     fill: #25d366;
 }
 
+/* Pastikan area konten tabel Filament & Mekaya memanfaatkan 100% lebar layar */
+.fi-main,
+.fi-main.mky-main,
+.fi-width-full {
+    max-width: 100% !important;
+    width: 100% !important;
+}
+
 
