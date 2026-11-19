@@ -766,6 +766,78 @@ class FreightReconciliationTest extends TestCase
         $this->assertStringContainsString('Perhatian: Ekspedisi di catatan gudang berbeda', $item->shipmentMatchTooltip());
     }
 
+    public function test_smart_fallback_matches_shipment_via_date_store_and_city_when_resi_and_sj_are_not_available(): void
+    {
+        $kmExpedition = Expedition::create([
+            'name' => 'Karya Mandiri',
+            'code' => 'KM',
+            'is_active' => true,
+        ]);
+
+        ExpeditionRateCard::create([
+            'expedition_id' => $kmExpedition->id,
+            'origin_depo' => 'SEMARANG',
+            'destination_city' => 'PARAKAN',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 50000.0,
+            'min_kg' => 1.0,
+            'is_active' => true,
+        ]);
+
+        // Catatan gudang belum diisi nomor resi ekspedisi oleh admin gudang
+        $shipment = CsaShipment::create([
+            'source' => CsaShipment::SOURCE_SPREADSHEET,
+            'kode_gudang' => 'GMSMG',
+            'nama_gudang' => 'SEMARANG',
+            'no_sj' => '2609000545',
+            'no_resi_awb' => '',
+            'tujuan_dealer' => 'CV. RASYA ACCESSORIES',
+            'nama_kota' => 'PARAKAN',
+            'tanggal_kirim' => '2026-09-02',
+            'nama_ekspedisi' => 'KARYA MANDIRI',
+            'target_sheet' => 'SEMARANG',
+            'badan_usaha' => 'PT. MEDIA SELULAR INDONESIA',
+            'reff_note' => 'IT-SEMARANG',
+            'total_nominal_sj' => 5000000.0,
+            'berat' => 1.0,
+        ]);
+
+        // Invoice ekspedisi hanya membawa nomor tanda terima ekspedisi (880), tanpa nomor SJ
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $kmExpedition->id,
+            'invoice_number' => 'INV-KM-TEST',
+            'invoice_date' => '2026-09-30',
+            'origin_city' => 'SEMARANG',
+            'status' => 'processing',
+        ]);
+
+        $result = (new FreightReconciliationService)->reconcile($invoice, [[
+            'no_resi_awb' => '880',
+            'no_sj' => '',
+            'shipment_date' => '2026-09-02',
+            'recipient_name' => 'RASYA',
+            'destination_city' => 'PARAKAN',
+            'billed_weight' => 1.0,
+            'billed_rate' => 50000.0,
+            'billed_total' => 50000.0,
+        ]]);
+
+        $item = $result->items->sole();
+
+        // 1. Berhasil terhubung ke Data Pengiriman
+        $this->assertSame($shipment->id, $item->csa_shipment_id);
+        $this->assertSame('matched', $item->shipment_match_status);
+        $this->assertSame('dealer_date', $item->shipment_matched_by);
+
+        // 2. Nomor SJ otomatis ditarik dari Data Pengiriman ke item invoice
+        $this->assertSame('2609000545', $item->no_sj);
+        $this->assertStringContainsString('Cocok via Toko [CV. RASYA ACCESSORIES]', $item->audit_notes);
+        $this->assertStringContainsString('Cocok via Tanggal, Toko & Kota', $item->shipmentMatchTooltip());
+
+        // 3. Win-win: Nomor resi ekspedisi otomatis di-backfill ke catatan pengiriman gudang
+        $this->assertSame('880', $shipment->fresh()->no_resi_awb);
+    }
+
     /**
      * @param  list<list<mixed>>  $rows
      */

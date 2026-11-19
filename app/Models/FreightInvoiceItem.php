@@ -274,6 +274,7 @@ class FreightInvoiceItem extends Model
             $parts[] = match ($this->shipment_matched_by) {
                 'resi' => 'Cocok via No. Resi',
                 'sj' => 'Cocok via No. SJ',
+                'dealer_date' => 'Cocok via Tanggal, Toko & Kota',
                 default => 'Cocok Data Pengiriman',
             };
         }

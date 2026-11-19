@@ -8,8 +8,11 @@ use App\Models\ExpeditionRateCard;
 use App\Models\FreightInvoice;
 use App\Models\FreightInvoiceItem;
 use App\Support\Rupiah;
+use Carbon\Carbon;
 use Exception;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class FreightReconciliationService
 {
@@ -57,9 +60,10 @@ class FreightReconciliationService
             $origins = collect($rateCards)->flatten()->map(fn (ExpeditionRateCard $card): string => $this->upper($card->origin_depo))->unique()->values()->all();
             $expedition = $invoice->expedition;
 
-            // Pre-load Data Pengiriman (csa_shipments) dalam 2 query batch untuk pencocokan resi & SJ
+            // Pre-load Data Pengiriman (csa_shipments) dalam batch query untuk pencocokan resi, SJ, & smart fallback
             $shipmentsByResi = $this->loadShipmentsByResi($rawItems);
             $shipmentsBySj = $this->loadShipmentsBySj($rawItems);
+            $fallbackShipments = $this->loadFallbackShipments($rawItems, $invoice, $origins);
 
             // Pre-load previously approved resi numbers to catch duplicate invoicing
             $previousResi = FreightInvoiceItem::where('freight_invoice_id', '!=', $invoice->id)
@@ -177,6 +181,7 @@ class FreightReconciliationService
                     expedition: $expedition,
                     shipmentsByResi: $shipmentsByResi,
                     shipmentsBySj: $shipmentsBySj,
+                    fallbackShipments: $fallbackShipments,
                 );
 
                 $shipmentMatchStatus = 'unmatched';
@@ -205,6 +210,10 @@ class FreightReconciliationService
                         }
                     } else {
                         $shipmentMatchStatus = 'matched';
+                    }
+
+                    if ($shipmentMatchedBy === 'dealer_date' && filled($shipmentMatch['tujuan_dealer'])) {
+                        $auditNotes[] = "Cocok via Toko [{$shipmentMatch['tujuan_dealer']}]";
                     }
                 }
 
@@ -490,6 +499,8 @@ class FreightReconciliationService
         $res = [
             'no_resi_awb' => '',
             'no_sj' => '',
+            'shipment_date' => null,
+            'recipient_name' => '',
             'origin_depo' => '',
             'destination_city' => '',
             'service_type' => '',
@@ -526,6 +537,8 @@ class FreightReconciliationService
             $filled[$field] = true;
             $res[$field] = match ($field) {
                 'no_resi_awb', 'no_sj' => $this->reader->normalizeIdentifier($v),
+                'shipment_date' => $this->parseDateValue($v),
+                'recipient_name' => strtoupper($v),
                 'gross_weight', 'billed_weight' => (float) str_replace(',', '.', $v),
                 'billed_rate', 'billed_insurance', 'billed_total', 'invoice_nominal_sj' => Rupiah::parse($v),
                 default => $v,
@@ -542,6 +555,38 @@ class FreightReconciliationService
     }
 
     /**
+     * Parse date value from Excel/CSV (serial number or various string date formats) into Y-m-d.
+     */
+    protected function parseDateValue(mixed $val): ?string
+    {
+        if (blank($val)) {
+            return null;
+        }
+
+        if (is_numeric($val) && (float) $val > 20000 && (float) $val < 80000) {
+            try {
+                return Carbon::instance(Date::excelToDateTimeObject((float) $val))->toDateString();
+            } catch (\Throwable) {
+            }
+        }
+
+        $str = trim((string) $val);
+
+        foreach (['Y-m-d', 'd.m.Y', 'd/m/Y', 'd-m-Y', 'Y/m/d', 'j-M-y', 'd-M-y', 'd M Y', 'd F Y'] as $fmt) {
+            try {
+                return Carbon::createFromFormat($fmt, $str)->toDateString();
+            } catch (\Throwable) {
+            }
+        }
+
+        try {
+            return Carbon::parse($str)->toDateString();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Kolom invoice ekspedisi => field rekonsiliasi. Urutan pengecekan penting: "Tariff Total" adalah total,
      * bukan tarif per kg; "CEK TARIF" dan keterangan adalah catatan admin, bukan data tagihan.
      */
@@ -554,6 +599,9 @@ class FreightReconciliationService
 
         return match (true) {
             $h === '' || str_contains($h, 'cek') || str_contains($h, 'ket') => null,
+            str_contains($h, 'tanggal') || str_contains($h, 'tgl') || $h === 'date' => 'shipment_date',
+            str_contains($h, 'penerima') || str_contains($h, 'receiver') || str_contains($h, 'dealer') || str_contains($h, 'toko') || str_contains($h, 'consignee') => 'recipient_name',
+            str_contains($h, 'pengirim') || str_contains($h, 'sender') => 'invoice_badan_usaha',
             str_contains($h, 'nominal') || $h === 'ammount' || $h === 'amount' => 'invoice_nominal_sj',
             str_contains($h, 'badan usaha') => 'invoice_badan_usaha',
             str_contains($h, 'reffnote') || str_contains($h, 'reff note') || $h === 'reff' => 'invoice_reff_note',
@@ -788,12 +836,153 @@ class FreightReconciliationService
     }
 
     /**
-     * Cocokkan satu baris invoice ke Data Pengiriman (prioritas No. Resi, lalu fallback No. SJ yang terverifikasi konteksnya)
-     * dan gabungkan field Badan Usaha, Reffnote, Brand, No. SJ, Total Nominal SJ, serta Berat Gudang.
+     * Pre-load Data Pengiriman untuk Smart Fallback (pencocokan tanggal + toko + kota)
+     * saat nomor resi dan nomor SJ keduanya tidak cocok atau tidak tersedia di invoice.
+     *
+     * @param  array<int, array<string, mixed>>  $rawItems
+     * @param  list<string>  $origins
+     * @return Collection<int, CsaShipment>
+     */
+    protected function loadFallbackShipments(array $rawItems, FreightInvoice $invoice, array $origins): Collection
+    {
+        $dates = collect($rawItems)
+            ->pluck('shipment_date')
+            ->filter()
+            ->values();
+
+        if ($dates->isEmpty()) {
+            return collect();
+        }
+
+        $minDate = Carbon::parse($dates->min())->subDays(3)->toDateString();
+        $maxDate = Carbon::parse($dates->max())->addDays(3)->toDateString();
+
+        $origin = $invoice->origin_city ?: ($origins[0] ?? null);
+
+        $query = CsaShipment::query()
+            ->whereBetween('tanggal_kirim', [$minDate.' 00:00:00', $maxDate.' 23:59:59'])
+            ->whereNotNull('tujuan_dealer')
+            ->where('tujuan_dealer', '!=', '');
+
+        if ($origin !== null && $origin !== '') {
+            $upperOrigin = strtoupper(trim($origin));
+            $query->where(function ($q) use ($upperOrigin) {
+                $q->where('target_sheet', $upperOrigin)
+                    ->orWhere('nama_gudang', $upperOrigin)
+                    ->orWhere('reff_note', 'LIKE', "%{$upperOrigin}%");
+            });
+        }
+
+        return $query->get([
+            'id', 'no_resi_awb', 'no_sj', 'badan_usaha', 'reff_note', 'brand',
+            'tujuan_dealer', 'nama_kota', 'tanggal_kirim', 'total_nominal_sj',
+            'berat', 'qty_koli', 'nama_ekspedisi', 'target_sheet', 'nama_gudang',
+        ]);
+    }
+
+    /**
+     * Cocokkan baris invoice ke Data Pengiriman berdasarkan kombinasi:
+     * Tanggal Kirim (+/- 2 hari) + Kesamaan Nama Toko/Dealer + Kesamaan Kota Tujuan.
+     *
+     * @param  array<string, mixed>  $item
+     * @param  Collection<int, CsaShipment>  $fallbackShipments
+     */
+    protected function matchByDealerAndDate(
+        array $item,
+        ?string $originDepo,
+        ?Expedition $expedition,
+        Collection $fallbackShipments
+    ): ?CsaShipment {
+        $itemDate = $item['shipment_date'] ?? null;
+        $recipientName = strtoupper(trim((string) ($item['recipient_name'] ?? '')));
+        $destinationCity = strtoupper(trim((string) ($item['destination_city'] ?? '')));
+
+        if ($itemDate === null || $recipientName === '') {
+            return null;
+        }
+
+        // Singkirkan kata-kata umum badan usaha/toko agar pencarian fokus pada nama unik dealer
+        $stopWords = ['CV', 'PT', 'UD', 'TOKO', 'CELL', 'SELULAR', 'CELLULAR', 'ACCESSORIES', 'ACC', 'STORE', 'SHOP', 'JAYA', 'ABADI', 'BARU', 'KEC', 'KAB', 'DESA'];
+        $words = array_values(array_filter(
+            preg_split('/[\s,\.\-]+/', $recipientName) ?: [],
+            fn (string $w): bool => strlen($w) >= 3 && ! in_array($w, $stopWords, true),
+        ));
+
+        if ($words === [] && strlen($recipientName) < 3) {
+            return null;
+        }
+
+        $bestCandidate = null;
+        $bestScore = 0;
+
+        foreach ($fallbackShipments as $cand) {
+            if ($cand->tanggal_kirim === null) {
+                continue;
+            }
+
+            $candDate = Carbon::parse($cand->tanggal_kirim)->toDateString();
+            $diffDays = abs(Carbon::parse($candDate)->diffInDays(Carbon::parse($itemDate), false));
+
+            // Maksimal selisih 2 hari kalender
+            if ($diffDays > 2) {
+                continue;
+            }
+
+            // Jika ekspedisi pada data pengiriman sudah terisi, pastikan kompatibel
+            if ($expedition !== null && filled($cand->nama_ekspedisi) && ! $this->expeditionMatches($expedition, $cand->nama_ekspedisi)) {
+                continue;
+            }
+
+            $candDealer = strtoupper(trim((string) $cand->tujuan_dealer));
+            $candCity = strtoupper(trim((string) $cand->nama_kota));
+
+            $score = 0;
+
+            // 1. Bonus kecocokan kota tujuan
+            if ($destinationCity !== '' && $candCity !== '') {
+                if (str_contains($candCity, $destinationCity) || str_contains($destinationCity, $candCity)) {
+                    $score += 15;
+                }
+            }
+
+            // 2. Kecocokan token nama toko unik
+            foreach ($words as $w) {
+                if (str_contains($candDealer, $w)) {
+                    $score += 10;
+                }
+            }
+
+            // 3. Kecocokan nama penerima penuh (substring)
+            if (strlen($recipientName) >= 4 && str_contains($candDealer, $recipientName)) {
+                $score += 20;
+            }
+
+            // 4. Bonus tanggal persis sama
+            if ($candDate === $itemDate) {
+                $score += 10;
+            } elseif ($diffDays <= 1) {
+                $score += 5;
+            }
+
+            // Ambang batas: minimal ada kecocokan nama toko (10) + kota/tanggal (15) = 25
+            if ($score >= 25 && $score > $bestScore) {
+                $bestScore = $score;
+                $bestCandidate = $cand;
+            }
+        }
+
+        return $bestCandidate;
+    }
+
+    /**
+     * Cocokkan satu baris invoice ke Data Pengiriman (prioritas No. Resi, lalu fallback No. SJ yang terverifikasi konteksnya,
+     * dan smart fallback tanggal + toko + kota jika resi/SJ tidak cocok) dan gabungkan field Badan Usaha, Reffnote, Brand,
+     * No. SJ, Total Nominal SJ, serta Berat Gudang.
      *
      * @param  array<string, mixed>  $item
      * @param  array<string, list<CsaShipment>>  $shipmentsByResi
      * @param  array<string, list<CsaShipment>>  $shipmentsBySj
+     * @param  Collection<int, CsaShipment>|null  $fallbackShipments
      * @return array{
      *     csa_shipment_id: ?int,
      *     matched_by: ?string,
@@ -802,6 +991,7 @@ class FreightReconciliationService
      *     badan_usaha: ?string,
      *     reff_note: ?string,
      *     brand: ?string,
+     *     tujuan_dealer: ?string,
      *     nominal_sj: float,
      *     weight: ?float,
      * }
@@ -814,6 +1004,7 @@ class FreightReconciliationService
         ?Expedition $expedition,
         array $shipmentsByResi,
         array $shipmentsBySj,
+        ?Collection $fallbackShipments = null,
     ): array {
         $empty = [
             'csa_shipment_id' => null,
@@ -823,6 +1014,7 @@ class FreightReconciliationService
             'badan_usaha' => null,
             'reff_note' => null,
             'brand' => null,
+            'tujuan_dealer' => null,
             'nominal_sj' => 0.0,
             'weight' => null,
         ];
@@ -898,12 +1090,26 @@ class FreightReconciliationService
             }
         }
 
+        // 3. Smart Fallback: Tanggal Kirim + Nama Toko/Penerima + Kota Tujuan
+        if ($candidates === [] && $fallbackShipments !== null && $fallbackShipments->isNotEmpty()) {
+            $fallback = $this->matchByDealerAndDate($item, $originDepo, $expedition, $fallbackShipments);
+            if ($fallback !== null) {
+                $candidates = [$fallback];
+                $matchedBy = 'dealer_date';
+            }
+        }
+
         if ($candidates === []) {
             return $empty;
         }
 
         $deduped = $this->deduplicateShipments($candidates);
         $first = $deduped[0];
+
+        // Backfill No. Resi ke Data Pengiriman jika belum ada dan nomor resi invoice valid
+        if ($matchedBy === 'dealer_date' && ! $this->isValidIdentifier((string) $first->no_resi_awb) && $this->isValidIdentifier($noResi)) {
+            $first->update(['no_resi_awb' => $noResi]);
+        }
 
         $sjs = [];
         $badanUsaha = [];
@@ -950,6 +1156,7 @@ class FreightReconciliationService
             'badan_usaha' => $badanUsaha !== [] ? implode(', ', array_values(array_unique($badanUsaha))) : null,
             'reff_note' => $reffNotes !== [] ? implode(', ', array_values(array_unique($reffNotes))) : null,
             'brand' => $brands !== [] ? implode(', ', array_values(array_unique($brands))) : null,
+            'tujuan_dealer' => $first->tujuan_dealer ?: null,
             'nominal_sj' => round($nominalSum, 2),
             'weight' => $hasWeight ? round($weightSum, 2) : null,
         ];
