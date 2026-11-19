@@ -85,6 +85,81 @@ class ViewFreightInvoice extends ViewRecord
         return [
             ExplainTotalsAction::make(),
 
+            Action::make('exportFullReconciliation')
+                ->label('Download Hasil Rekonsiliasi Lengkap (CSV)')
+                ->icon('heroicon-o-document-arrow-down')
+                ->color('success')
+                ->visible(fn (): bool => $this->record->total_items_count > 0)
+                ->action(function (): StreamedResponse {
+                    $invoice = $this->record;
+                    $filename = "Hasil_Rekonsiliasi_{$invoice->invoice_number}.csv";
+
+                    return response()->streamDownload(function () use ($invoice) {
+                        $output = fopen('php://output', 'w');
+
+                        fwrite($output, "\xEF\xBB\xBF");
+
+                        fputcsv($output, [
+                            'Nomor Resi / AWB',
+                            'Nomor SJ',
+                            'Badan Usaha',
+                            'Reffnote',
+                            'Brand',
+                            'Total Nominal SJ (Rp)',
+                            'Rasio Ongkir (%)',
+                            'Depo Asal',
+                            'Kota Tujuan',
+                            'Layanan',
+                            'Berat Tagihan (kg)',
+                            'Berat Gudang (kg)',
+                            'Tarif Tagihan (Rp/kg)',
+                            'Tarif Kontrak (Rp/kg)',
+                            'Biaya Asuransi (Rp)',
+                            'Total Ditagih (Rp)',
+                            'Layak Dibayar (Rp)',
+                            'Koreksi / Selisih (Rp)',
+                            'Cek Tarif Kontrak',
+                            'Cek Data Pengiriman',
+                            'Kunci Cocok',
+                            'Catatan Audit',
+                        ]);
+
+                        foreach ($invoice->items()->orderBy('id')->cursor() as $item) {
+                            fputcsv($output, [
+                                $item->no_resi_awb,
+                                $item->no_sj ?? '-',
+                                $item->shipment_badan_usaha ?? '-',
+                                $item->shipment_reff_note ?? '-',
+                                $item->shipment_brand ?? '-',
+                                $item->shipment_nominal_sj ?? 0,
+                                $item->costRatioPercent() !== null ? number_format($item->costRatioPercent(), 2, '.', '') : '-',
+                                $item->origin_depo ?? '-',
+                                $item->destination_city ?? '-',
+                                $item->service_type ?? '-',
+                                $item->billed_weight,
+                                $item->shipment_weight ?? '',
+                                $item->billed_rate,
+                                $item->agreed_rate,
+                                $item->billed_insurance,
+                                $item->billed_total,
+                                $item->isUnverified() ? 'Belum terverifikasi' : $item->approvedAmount(),
+                                $item->correctionAmount(),
+                                $item->checkLabel(),
+                                $item->shipmentMatchLabel(),
+                                $item->shipment_matched_by ?? '-',
+                                implode(' | ', array_filter([
+                                    $item->isManuallyApproved() ? 'Disetujui manual: '.$item->manual_note : null,
+                                    $item->audit_notes,
+                                ])),
+                            ]);
+                        }
+
+                        fclose($output);
+                    }, $filename, [
+                        'Content-Type' => 'text/csv; charset=UTF-8',
+                    ]);
+                }),
+
             Action::make('exportDispute')
                 ->label('Download Berita Acara Selisih (CSV)')
                 ->icon('heroicon-o-arrow-down-tray')
@@ -104,11 +179,15 @@ class ViewFreightInvoice extends ViewRecord
                         fputcsv($output, [
                             'Nomor Resi / AWB',
                             'Nomor SJ',
+                            'Badan Usaha',
+                            'Reffnote',
+                            'Brand',
                             'Depo Asal',
                             'Kota Tujuan',
                             'Layanan',
                             'Berat Tagihan (kg)',
                             'Berat Timbang (kg)',
+                            'Berat Gudang (kg)',
                             'Selisih Berat (kg)',
                             'Tarif Tagihan (Rp/kg)',
                             'Tarif Kontrak PKS (Rp/kg)',
@@ -116,6 +195,7 @@ class ViewFreightInvoice extends ViewRecord
                             'Total Sesuai Kontrak (Rp)',
                             'Nilai Koreksi / Potongan (Rp)',
                             'Status Temuan',
+                            'Status Data Pengiriman',
                             'Keterangan Audit',
                         ]);
 
@@ -124,11 +204,15 @@ class ViewFreightInvoice extends ViewRecord
                             fputcsv($output, [
                                 $item->no_resi_awb,
                                 $item->no_sj ?? '-',
+                                $item->shipment_badan_usaha ?? '-',
+                                $item->shipment_reff_note ?? '-',
+                                $item->shipment_brand ?? '-',
                                 $item->origin_depo ?? '-',
                                 $item->destination_city ?? '-',
                                 $item->service_type ?? '-',
                                 $item->billed_weight,
                                 $item->actual_weight ?? 0,
+                                $item->shipment_weight ?? '',
                                 $item->weight_discrepancy,
                                 $item->billed_rate,
                                 $item->agreed_rate,
@@ -136,6 +220,7 @@ class ViewFreightInvoice extends ViewRecord
                                 $item->isUnverified() ? 'Belum terverifikasi' : $item->approvedAmount(),
                                 $item->correctionAmount(),
                                 $item->checkLabel(),
+                                $item->shipmentMatchLabel(),
                                 implode(' | ', array_filter([
                                     $item->isManuallyApproved() ? 'Disetujui manual: '.$item->manual_note : null,
                                     $item->audit_notes,

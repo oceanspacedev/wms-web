@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\FreightInvoices\Actions\ExplainTotalsAction;
 use App\Filament\Resources\FreightInvoices\Pages\CreateFreightInvoice;
 use App\Filament\Resources\FreightInvoices\Pages\ListFreightInvoices;
 use App\Filament\Resources\FreightInvoices\Pages\ViewFreightInvoice;
 use App\Filament\Resources\FreightInvoices\RelationManagers\ItemsRelationManager;
 use App\Jobs\ProcessFreightReconciliationJob;
+use App\Models\CsaShipment;
 use App\Models\Expedition;
 use App\Models\ExpeditionRateCard;
 use App\Models\FreightInvoice;
@@ -525,6 +527,243 @@ class FreightReconciliationTest extends TestCase
         } finally {
             @unlink($path);
         }
+    }
+
+    public function test_reconciliation_enriches_items_from_data_pengiriman_by_resi_and_checks_warehouse_weight(): void
+    {
+        // Dua SJ digabung dalam 1 resi (plus 1 baris duplikat identik yang tidak boleh terhitung ganda)
+        $s1 = CsaShipment::create([
+            'source' => CsaShipment::SOURCE_SPREADSHEET,
+            'kode_gudang' => 'GMCRB',
+            'nama_gudang' => 'GUDANG CIREBON',
+            'no_sj' => '2610000406',
+            'no_resi_awb' => '1364514632',
+            'badan_usaha' => 'CV. TOP SELULAR',
+            'reff_note' => 'REALME - DP CIREBON',
+            'brand' => 'REALME',
+            'total_nominal_sj' => 10000000,
+            'berat' => 2.0,
+            'nama_ekspedisi' => 'J&T EXPRESS',
+            'target_sheet' => 'CIREBON',
+        ]);
+        CsaShipment::create([
+            'source' => CsaShipment::SOURCE_SPREADSHEET,
+            'kode_gudang' => 'GMCRB',
+            'nama_gudang' => 'GUDANG CIREBON',
+            'no_sj' => '2610000406',
+            'no_resi_awb' => '1364514632',
+            'badan_usaha' => 'CV. TOP SELULAR',
+            'reff_note' => 'REALME - DP CIREBON',
+            'brand' => 'REALME',
+            'total_nominal_sj' => 10000000,
+            'berat' => 2.0,
+            'nama_ekspedisi' => 'J&T EXPRESS',
+            'target_sheet' => 'CIREBON',
+        ]);
+        CsaShipment::create([
+            'source' => CsaShipment::SOURCE_SPREADSHEET,
+            'kode_gudang' => 'GMCRB',
+            'nama_gudang' => 'GUDANG CIREBON',
+            'no_sj' => '2610000450',
+            'no_resi_awb' => '1364514632',
+            'badan_usaha' => 'CV. TOP SELULAR',
+            'reff_note' => 'REALME - DP CIREBON',
+            'brand' => 'REALME',
+            'total_nominal_sj' => 12723000,
+            'berat' => 3.0,
+            'nama_ekspedisi' => 'J&T EXPRESS',
+            'target_sheet' => 'CIREBON',
+        ]);
+
+        // Satu resi dengan selisih berat (gudang 2 kg, ditagih ekspedisi 5 kg)
+        CsaShipment::create([
+            'source' => CsaShipment::SOURCE_SPREADSHEET,
+            'kode_gudang' => 'GMCRB',
+            'nama_gudang' => 'GUDANG CIREBON',
+            'no_sj' => '2610000999',
+            'no_resi_awb' => '1364999999',
+            'badan_usaha' => 'PT. MEDIA SELULAR INDONESIA',
+            'reff_note' => 'IT - CIREBON',
+            'brand' => 'ITEL',
+            'total_nominal_sj' => 8000000,
+            'berat' => 2.0,
+            'nama_ekspedisi' => 'J&T',
+            'target_sheet' => 'CIREBON',
+        ]);
+
+        // Resi placeholder '-' di Data Pengiriman tidak boleh ikut cocok
+        CsaShipment::create([
+            'source' => CsaShipment::SOURCE_SPREADSHEET,
+            'kode_gudang' => 'GMCRB',
+            'nama_gudang' => 'GUDANG CIREBON',
+            'no_sj' => '2610008888',
+            'no_resi_awb' => '-',
+            'badan_usaha' => 'SHOULD NOT MATCH',
+            'target_sheet' => 'CIREBON',
+        ]);
+
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-SHIP-001',
+            'invoice_date' => now(),
+            'origin_city' => 'CIREBON',
+            'status' => 'processing',
+        ]);
+
+        $result = (new FreightReconciliationService)->reconcile($invoice, [
+            [
+                'no_resi_awb' => '1364514632',
+                'destination_city' => 'INDRAMAYU',
+                'service_type' => 'EZ',
+                'billed_weight' => 5.0,
+                'billed_rate' => 8000.0,
+                'billed_total' => 40000.0,
+            ],
+            [
+                'no_resi_awb' => '1364999999',
+                'destination_city' => 'INDRAMAYU',
+                'service_type' => 'EZ',
+                'billed_weight' => 5.0,
+                'billed_rate' => 8000.0,
+                'billed_total' => 40000.0,
+            ],
+            [
+                'no_resi_awb' => '-',
+                'destination_city' => 'INDRAMAYU',
+                'service_type' => 'EZ',
+                'billed_weight' => 1.0,
+                'billed_rate' => 8000.0,
+                'billed_total' => 8000.0,
+            ],
+        ]);
+
+        $items = $result->items->keyBy('no_resi_awb');
+
+        $first = $items->get('1364514632');
+        $this->assertSame($s1->id, $first->csa_shipment_id);
+        $this->assertSame('matched', $first->shipment_match_status);
+        $this->assertSame('resi', $first->shipment_matched_by);
+        $this->assertSame('2610000406, 2610000450', $first->no_sj);
+        $this->assertSame('CV. TOP SELULAR', $first->shipment_badan_usaha);
+        $this->assertSame('REALME - DP CIREBON', $first->shipment_reff_note);
+        $this->assertSame('REALME', $first->shipment_brand);
+        $this->assertEquals(22723000.0, (float) $first->shipment_nominal_sj);
+        $this->assertEquals(5.0, (float) $first->shipment_weight);
+
+        $second = $items->get('1364999999');
+        $this->assertSame('weight_mismatch', $second->shipment_match_status);
+        $this->assertEquals(2.0, (float) $second->shipment_weight);
+        $this->assertStringContainsString('Berat vs Data Pengiriman', $second->audit_notes);
+
+        $placeholder = $items->get('-');
+        $this->assertNull($placeholder->csa_shipment_id);
+        $this->assertSame('unmatched', $placeholder->shipment_match_status);
+
+        $summary = ExplainTotalsAction::shipmentSummary($result);
+        $this->assertSame(['matched' => 1, 'weight_mismatch' => 1, 'expedition_mismatch' => 0, 'unmatched' => 1], $summary);
+
+        $breakdown = ExplainTotalsAction::companyBreakdown($result);
+        $this->assertCount(3, $breakdown);
+    }
+
+    public function test_sj_fallback_does_not_link_wrong_depo_when_sj_number_collides(): void
+    {
+        // Nomor SJ sama dipakai di depo BANDUNG (bukan CIREBON)
+        CsaShipment::create([
+            'source' => CsaShipment::SOURCE_CSA,
+            'kode_gudang' => 'GMBDG',
+            'nama_gudang' => 'GUDANG BANDUNG',
+            'no_sj' => '2610000063',
+            'no_resi_awb' => null,
+            'badan_usaha' => 'PT Media Selular Indonesia',
+            'reff_note' => 'IT-BANDUNG',
+            'brand' => 'ITEL',
+            'total_nominal_sj' => 4291891,
+            'target_sheet' => 'BANDUNG',
+        ]);
+
+        // Nomor SJ sama di depo CIREBON (yang benar)
+        $cirebon = CsaShipment::create([
+            'source' => CsaShipment::SOURCE_CSA,
+            'kode_gudang' => 'GMCRB',
+            'nama_gudang' => 'GUDANG CIREBON',
+            'no_sj' => '2610000063',
+            'no_resi_awb' => null,
+            'badan_usaha' => 'CV. TOP SELULAR',
+            'reff_note' => 'REALME - DP CIREBON',
+            'brand' => 'REALME',
+            'total_nominal_sj' => 11686000,
+            'berat' => 3.0,
+            'target_sheet' => 'CIREBON',
+        ]);
+
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-SJ-DISAMBIGUATE',
+            'invoice_date' => now(),
+            'origin_city' => 'CIREBON',
+            'status' => 'processing',
+        ]);
+
+        $result = (new FreightReconciliationService)->reconcile($invoice, [[
+            'no_resi_awb' => '1364424429',
+            'no_sj' => '2610000063',
+            'destination_city' => 'INDRAMAYU',
+            'billed_weight' => 3.0,
+            'billed_rate' => 8000.0,
+            'billed_total' => 24000.0,
+        ]]);
+
+        $item = $result->items->sole();
+        $this->assertSame($cirebon->id, $item->csa_shipment_id);
+        $this->assertSame('sj', $item->shipment_matched_by);
+        $this->assertSame('CV. TOP SELULAR', $item->shipment_badan_usaha);
+        $this->assertEquals(11686000.0, (float) $item->shipment_nominal_sj);
+    }
+
+    public function test_detects_expedition_mismatch_when_warehouse_records_different_carrier(): void
+    {
+        // Di gudang dicatat dikirim via KARYA MANDIRI
+        $shipment = CsaShipment::create([
+            'source' => CsaShipment::SOURCE_SPREADSHEET,
+            'kode_gudang' => 'GMCRB',
+            'nama_gudang' => 'GUDANG CIREBON',
+            'no_sj' => '2610007777',
+            'no_resi_awb' => '9999123456',
+            'badan_usaha' => 'CV. TOP SELULAR',
+            'reff_note' => 'REALME - DP CIREBON',
+            'brand' => 'REALME',
+            'total_nominal_sj' => 5000000,
+            'berat' => 3.0,
+            'nama_ekspedisi' => 'KARYA MANDIRI',
+            'target_sheet' => 'CIREBON',
+        ]);
+
+        // Ditagih oleh invoice J&T Express
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-JNT-MISMATCH',
+            'invoice_date' => now(),
+            'origin_city' => 'CIREBON',
+            'status' => 'processing',
+        ]);
+
+        $result = (new FreightReconciliationService)->reconcile($invoice, [[
+            'no_resi_awb' => '9999123456',
+            'destination_city' => 'INDRAMAYU',
+            'service_type' => 'EZ',
+            'billed_weight' => 3.0,
+            'billed_rate' => 8000.0,
+            'billed_total' => 24000.0,
+        ]]);
+
+        $item = $result->items->sole();
+        $this->assertSame($shipment->id, $item->csa_shipment_id);
+        $this->assertSame('expedition_mismatch', $item->shipment_match_status);
+        $this->assertStringContainsString('Beda Ekspedisi', $item->audit_notes);
+        $this->assertSame('BEDA EKSPEDISI', $item->shipmentMatchLabel());
+        $this->assertSame('danger', $item->shipmentMatchColor());
+        $this->assertStringContainsString('Perhatian: Ekspedisi di catatan gudang berbeda', $item->shipmentMatchTooltip());
     }
 
     /**

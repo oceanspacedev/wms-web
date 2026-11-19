@@ -17,7 +17,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
- * Hasil cek tiap baris invoice ekspedisi terhadap Tarif Kontrak (kolom "CEK TARIF").
+ * Hasil cek tiap baris invoice ekspedisi terhadap Tarif Kontrak dan Data Pengiriman Gudang.
  */
 class ItemsRelationManager extends RelationManager
 {
@@ -34,60 +34,122 @@ class ItemsRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('no_resi_awb')
-            // Halaman detail hanya berisi tabel ini, jadi tidak perlu judul tabel
             ->heading(null)
             ->defaultSort('id')
             ->paginated([25, 50, 100])
             ->columns([
                 TextColumn::make('no_resi_awb')
                     ->label('No Resi')
-                    ->description(fn (FreightInvoiceItem $record): ?string => $record->no_sj ? 'SJ '.$record->no_sj : null)
-                    ->searchable(['no_resi_awb', 'no_sj'])
+                    ->description(fn (FreightInvoiceItem $record): ?string => $record->no_sj ? 'SJ '.str($record->no_sj)->limit(18) : null)
+                    ->tooltip(fn (FreightInvoiceItem $record): ?string => strlen((string) $record->no_sj) > 18 ? 'SJ: '.$record->no_sj : null)
+                    ->searchable(['no_resi_awb', 'no_sj', 'shipment_badan_usaha', 'shipment_reff_note', 'shipment_brand'])
                     ->copyable()
                     ->weight('bold'),
-                // Catatan hasil cek muncul saat kursor diarahkan ke badge, supaya baris tidak memanjang
+
                 TextColumn::make('audit_status')
                     ->label('CEK TARIF')
                     ->badge()
                     ->formatStateUsing(fn (FreightInvoiceItem $record): string => $record->checkLabel())
                     ->color(fn (FreightInvoiceItem $record): string => $record->checkColor())
                     ->tooltip(fn (FreightInvoiceItem $record): ?string => $this->notes($record)),
+
+                TextColumn::make('shipment_match_status')
+                    ->label('Pengiriman')
+                    ->badge()
+                    ->formatStateUsing(fn (FreightInvoiceItem $record): string => $record->shipmentMatchLabel())
+                    ->color(fn (FreightInvoiceItem $record): string => $record->shipmentMatchColor())
+                    ->tooltip(fn (FreightInvoiceItem $record): ?string => $record->shipmentMatchTooltip()),
+
                 TextColumn::make('destination_city')
                     ->label('Rute')
-                    ->formatStateUsing(fn (?string $state, FreightInvoiceItem $record): string => ($record->origin_depo ?: '-').' → '.(trim(explode('-', (string) $state)[0]) ?: '-'))
-                    ->description(fn (FreightInvoiceItem $record): ?string => $record->service_type)
-                    ->tooltip(fn (FreightInvoiceItem $record): ?string => $record->destination_city),
+                    ->formatStateUsing(function (?string $state, FreightInvoiceItem $record): string {
+                        $destination = trim(explode('-', (string) $state)[0]) ?: '-';
+
+                        return ($record->origin_depo ?: '-').' → '.str($destination)->limit(18);
+                    })
+                    ->description(fn (FreightInvoiceItem $record): ?string => implode(' · ', array_filter([
+                        $record->service_type,
+                        $record->shipment_badan_usaha ? str($record->shipment_badan_usaha)->limit(18)->toString() : null,
+                    ])) ?: null)
+                    ->tooltip(fn (FreightInvoiceItem $record): ?string => implode(' · ', array_filter([
+                        ($record->origin_depo ?: '-').' → '.($record->destination_city ?: '-'),
+                        $record->shipment_badan_usaha,
+                        $record->shipment_reff_note,
+                        $record->shipment_brand ? 'Brand: '.$record->shipment_brand : null,
+                    ])) ?: null),
+
                 TextColumn::make('billed_weight')
-                    ->label('Berat')
-                    ->formatStateUsing(fn ($state): string => $this->kg($state).' kg')
-                    ->description(fn (FreightInvoiceItem $record): ?string => $record->actual_weight !== null ? 'timbang '.$this->kg($record->actual_weight).' kg' : null),
-                TextColumn::make('billed_rate')
-                    ->label('Tarif/kg')
-                    ->formatStateUsing(fn ($state): string => 'Rp '.number_format((float) $state, 0, ',', '.'))
-                    ->description(fn (FreightInvoiceItem $record): string => (float) $record->agreed_rate > 0
-                        ? 'kontrak Rp '.number_format((float) $record->agreed_rate, 0, ',', '.')
-                        : 'kontrak -'),
+                    ->label('Berat & Tarif')
+                    ->formatStateUsing(function ($state, FreightInvoiceItem $record): string {
+                        $weight = $this->kg($state).' kg';
+
+                        if ((float) $record->billed_rate > 0) {
+                            return $weight.' × Rp '.number_format((float) $record->billed_rate, 0, ',', '.');
+                        }
+
+                        return $weight;
+                    })
+                    ->description(function (FreightInvoiceItem $record): string {
+                        $parts = [
+                            (float) $record->agreed_rate > 0
+                                ? 'kontrak Rp '.number_format((float) $record->agreed_rate, 0, ',', '.')
+                                : 'kontrak -',
+                        ];
+
+                        if ($record->shipment_weight !== null && abs((float) $record->billed_weight - (float) $record->shipment_weight) > 0.05) {
+                            $parts[] = 'gdg '.$this->kg($record->shipment_weight).' kg';
+                        } elseif ($record->actual_weight !== null && abs((float) $record->billed_weight - (float) $record->actual_weight) > 0.05) {
+                            $parts[] = 'tbg '.$this->kg($record->actual_weight).' kg';
+                        }
+
+                        return implode(' · ', $parts);
+                    })
+                    ->tooltip(fn (FreightInvoiceItem $record): string => $this->weightRateTooltip($record)),
+
                 TextColumn::make('billed_total')
                     ->label('Ditagih')
                     ->money('IDR', locale: 'id', decimalPlaces: 0)
+                    ->alignEnd()
                     ->description(fn (FreightInvoiceItem $record): ?string => (float) $record->billed_insurance > 0
-                        ? 'termasuk asuransi Rp '.number_format((float) $record->billed_insurance, 0, ',', '.')
+                        ? '+ asuransi Rp '.number_format((float) $record->billed_insurance, 0, ',', '.')
                         : null),
+
                 TextColumn::make('discrepancy_amount')
                     ->label('Selisih')
                     ->state(fn (FreightInvoiceItem $record): float => $record->correctionAmount())
                     ->money('IDR', locale: 'id', decimalPlaces: 0)
-                    // Alasan singkat di bawah nominal; catatan lengkap muncul saat kursor diarahkan
-                    ->description(fn (FreightInvoiceItem $record): ?string => $record->reason())
-                    ->tooltip(fn (FreightInvoiceItem $record): ?string => $record->reason() ? $this->notes($record) : null)
-                    ->wrap()
+                    ->alignEnd()
+                    ->description(fn (FreightInvoiceItem $record): ?string => $this->shortReason($record))
+                    ->tooltip(fn (FreightInvoiceItem $record): ?string => implode(' | ', array_filter([
+                        $record->reason(),
+                        $this->notes($record),
+                    ])) ?: null)
                     ->color(fn ($state): string => (float) $state > 0 ? 'danger' : 'gray'),
+
+                TextColumn::make('shipment_badan_usaha')
+                    ->label('Badan Usaha & Brand')
+                    ->placeholder('-')
+                    ->description(fn (FreightInvoiceItem $record): ?string => implode(' · ', array_filter([
+                        $record->shipment_reff_note,
+                        $record->shipment_brand,
+                    ])) ?: null)
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('shipment_nominal_sj')
+                    ->label('Nominal SJ')
+                    ->alignEnd()
+                    ->formatStateUsing(fn ($state): string => (float) $state > 0 ? 'Rp '.number_format((float) $state, 0, ',', '.') : '-')
+                    ->description(fn (FreightInvoiceItem $record): ?string => ($ratio = $record->costRatioPercent()) !== null
+                        ? 'ongkir '.number_format($ratio, 2, ',', '.').'%'
+                        : null)
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('audit_notes')
                     ->label('Catatan')
                     ->state(fn (FreightInvoiceItem $record): ?string => $this->notes($record))
                     ->placeholder('-')
-                    ->wrap()
                     ->limit(80)
+                    ->tooltip(fn (FreightInvoiceItem $record): ?string => $this->notes($record))
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
@@ -99,10 +161,12 @@ class ItemsRelationManager extends RelationManager
                         'manual' => $query->whereNotNull('manual_approved_at'),
                         default => $query->whereNull('manual_approved_at')->where('audit_status', $data['value']),
                     }),
+                SelectFilter::make('shipment_match_status')
+                    ->label('Data Pengiriman')
+                    ->options(FreightInvoiceItem::SHIPMENT_MATCH_LABELS),
             ])
             ->recordActions([
                 ActionGroup::make([
-                    // Kesepakatan khusus (charter, tarif khusus, dll.): resi dianggap sesuai dengan nominal yang disetujui
                     Action::make('approveManually')
                         ->label('Setujui Manual')
                         ->icon('heroicon-o-check-circle')
@@ -170,7 +234,6 @@ class ItemsRelationManager extends RelationManager
 
         app(FreightReconciliationService::class)->refreshTotals($invoice);
 
-        // Ringkasan di atas tabel ikut diperbarui tanpa reload halaman
         $this->dispatch('freight-invoice-updated');
     }
 
@@ -184,6 +247,56 @@ class ItemsRelationManager extends RelationManager
         ]);
 
         return $notes === [] ? null : implode(' | ', $notes);
+    }
+
+    private function shortReason(FreightInvoiceItem $record): ?string
+    {
+        if ($record->isManuallyApproved()) {
+            return 'Disetujui manual';
+        }
+
+        $agreed = (float) $record->agreed_rate;
+
+        return match ($record->audit_status) {
+            'matched' => match (true) {
+                str_contains((string) $record->audit_notes, 'belum ada di Tarif Kontrak') => 'Sesuai tarif DARAT',
+                (float) $record->billed_rate > 0 && (float) $record->billed_rate < $agreed - 0.5 => 'Lebih murah dr kontrak',
+                default => 'Sesuai kontrak',
+            },
+            'revisi_darat' => 'Harusnya DARAT',
+            'discrepancy_rate' => 'Tarif +Rp '.number_format((float) $record->billed_rate - $agreed, 0, ',', '.').'/kg',
+            'discrepancy_weight' => $record->reason(),
+            'discrepancy_both' => 'Berat & tarif lebih',
+            'missing_rate', 'unrecognized' => 'Tarif rute belum ada',
+            'missing_weight' => 'Berat belum diisi',
+            'duplicate' => 'Resi dobel',
+            default => null,
+        };
+    }
+
+    private function weightRateTooltip(FreightInvoiceItem $record): string
+    {
+        $parts = [
+            'Tagihan: '.$this->kg($record->billed_weight).' kg',
+        ];
+
+        if ($record->actual_weight !== null) {
+            $parts[] = 'Timbang: '.$this->kg($record->actual_weight).' kg';
+        }
+
+        if ($record->shipment_weight !== null) {
+            $parts[] = 'Gudang: '.$this->kg($record->shipment_weight).' kg';
+        }
+
+        if ((float) $record->billed_rate > 0) {
+            $parts[] = 'Tarif ditagih: Rp '.number_format((float) $record->billed_rate, 0, ',', '.').'/kg';
+        }
+
+        if ((float) $record->agreed_rate > 0) {
+            $parts[] = 'Kontrak: Rp '.number_format((float) $record->agreed_rate, 0, ',', '.').'/kg';
+        }
+
+        return implode(' · ', $parts);
     }
 
     private function kg(mixed $value): string
