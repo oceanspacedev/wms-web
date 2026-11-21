@@ -408,6 +408,20 @@ class StockAllocationTest extends TestCase
         $this->assertSame(StockAllocationTransfer::STATUS_REJECTED, $toBandung->refresh()->status);
     }
 
+    public function test_view_stock_allocation_can_approve_all_pending_transfers(): void
+    {
+        $allocation = $this->allocate();
+        $this->actingAsAdmin(['ViewAny:StockAllocation', 'View:StockAllocation', 'Update:StockAllocation']);
+
+        $this->assertSame(3, $allocation->transfers()->where('status', StockAllocationTransfer::STATUS_PENDING)->count());
+
+        Livewire::test(ViewStockAllocation::class, ['record' => $allocation->getRouteKey()])
+            ->callAction('approveAll')
+            ->assertNotified('3 saran transfer berhasil disetujui');
+
+        $this->assertSame(3, $allocation->transfers()->where('status', StockAllocationTransfer::STATUS_APPROVED)->count());
+    }
+
     public function test_allocation_with_mutation_documents_cannot_be_deleted(): void
     {
         $allocation = $this->allocate();

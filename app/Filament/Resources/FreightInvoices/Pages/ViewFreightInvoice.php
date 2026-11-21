@@ -6,6 +6,7 @@ use App\Filament\Resources\FreightInvoices\Actions\ExplainTotalsAction;
 use App\Filament\Resources\FreightInvoices\Actions\ReauditAction;
 use App\Filament\Resources\FreightInvoices\FreightInvoiceResource;
 use App\Models\FreightInvoice;
+use App\Services\FreightReconciliationExporter;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\EditAction;
@@ -86,153 +87,18 @@ class ViewFreightInvoice extends ViewRecord
             ExplainTotalsAction::make(),
 
             Action::make('exportFullReconciliation')
-                ->label('Download Hasil Rekonsiliasi Lengkap (CSV)')
+                ->label('Download Hasil Rekonsiliasi (Excel)')
                 ->icon('heroicon-o-document-arrow-down')
                 ->color('success')
                 ->visible(fn (): bool => $this->record->total_items_count > 0)
-                ->action(function (): StreamedResponse {
-                    $invoice = $this->record;
-                    $filename = "Hasil_Rekonsiliasi_{$invoice->invoice_number}.csv";
-
-                    return response()->streamDownload(function () use ($invoice) {
-                        $output = fopen('php://output', 'w');
-
-                        fwrite($output, "\xEF\xBB\xBF");
-
-                        fputcsv($output, [
-                            'Nomor Resi / AWB',
-                            'Nomor SJ',
-                            'Badan Usaha',
-                            'Reffnote',
-                            'Brand',
-                            'Total Nominal SJ (Rp)',
-                            'Rasio Ongkir (%)',
-                            'Depo Asal',
-                            'Kota Tujuan',
-                            'Layanan',
-                            'Berat Tagihan (kg)',
-                            'Berat Gudang (kg)',
-                            'Tarif Tagihan (Rp/kg)',
-                            'Tarif Kontrak (Rp/kg)',
-                            'Biaya Asuransi (Rp)',
-                            'Total Ditagih (Rp)',
-                            'Layak Dibayar (Rp)',
-                            'Koreksi / Selisih (Rp)',
-                            'Cek Tarif Kontrak',
-                            'Cek Data Pengiriman',
-                            'Kunci Cocok',
-                            'Catatan Audit',
-                        ]);
-
-                        foreach ($invoice->items()->orderBy('id')->cursor() as $item) {
-                            fputcsv($output, [
-                                $item->no_resi_awb,
-                                $item->no_sj ?? '-',
-                                $item->shipment_badan_usaha ?? '-',
-                                $item->shipment_reff_note ?? '-',
-                                $item->shipment_brand ?? '-',
-                                $item->shipment_nominal_sj ?? 0,
-                                $item->costRatioPercent() !== null ? number_format($item->costRatioPercent(), 2, '.', '') : '-',
-                                $item->origin_depo ?? '-',
-                                $item->destination_city ?? '-',
-                                $item->service_type ?? '-',
-                                $item->billed_weight,
-                                $item->shipment_weight ?? '',
-                                $item->billed_rate,
-                                $item->agreed_rate,
-                                $item->billed_insurance,
-                                $item->billed_total,
-                                $item->isUnverified() ? 'Belum terverifikasi' : $item->approvedAmount(),
-                                $item->correctionAmount(),
-                                $item->checkLabel(),
-                                $item->shipmentMatchLabel(),
-                                $item->shipment_matched_by ?? '-',
-                                implode(' | ', array_filter([
-                                    $item->isManuallyApproved() ? 'Disetujui manual: '.$item->manual_note : null,
-                                    $item->audit_notes,
-                                ])),
-                            ]);
-                        }
-
-                        fclose($output);
-                    }, $filename, [
-                        'Content-Type' => 'text/csv; charset=UTF-8',
-                    ]);
-                }),
+                ->action(fn (FreightReconciliationExporter $exporter): StreamedResponse => $exporter->downloadFull($this->record)),
 
             Action::make('exportDispute')
-                ->label('Download Berita Acara Selisih (CSV)')
+                ->label('Download Berita Acara Selisih (Excel)')
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('danger')
                 ->visible(fn (): bool => $this->record->total_discrepancy_amount > 0 || $this->record->total_unverified_amount > 0)
-                ->action(function (): StreamedResponse {
-                    $invoice = $this->record;
-                    $filename = "Berita_Acara_Koreksi_Tagihan_{$invoice->invoice_number}.csv";
-
-                    return response()->streamDownload(function () use ($invoice) {
-                        $output = fopen('php://output', 'w');
-
-                        // UTF-8 BOM for Excel compatibility
-                        fwrite($output, "\xEF\xBB\xBF");
-
-                        // Headers
-                        fputcsv($output, [
-                            'Nomor Resi / AWB',
-                            'Nomor SJ',
-                            'Badan Usaha',
-                            'Reffnote',
-                            'Brand',
-                            'Depo Asal',
-                            'Kota Tujuan',
-                            'Layanan',
-                            'Berat Tagihan (kg)',
-                            'Berat Timbang (kg)',
-                            'Berat Gudang (kg)',
-                            'Selisih Berat (kg)',
-                            'Tarif Tagihan (Rp/kg)',
-                            'Tarif Kontrak PKS (Rp/kg)',
-                            'Total Tagihan Ekspedisi (Rp)',
-                            'Total Sesuai Kontrak (Rp)',
-                            'Nilai Koreksi / Potongan (Rp)',
-                            'Status Temuan',
-                            'Status Data Pengiriman',
-                            'Keterangan Audit',
-                        ]);
-
-                        $items = $invoice->items()->where('audit_status', '!=', 'matched')->get();
-                        foreach ($items as $item) {
-                            fputcsv($output, [
-                                $item->no_resi_awb,
-                                $item->no_sj ?? '-',
-                                $item->shipment_badan_usaha ?? '-',
-                                $item->shipment_reff_note ?? '-',
-                                $item->shipment_brand ?? '-',
-                                $item->origin_depo ?? '-',
-                                $item->destination_city ?? '-',
-                                $item->service_type ?? '-',
-                                $item->billed_weight,
-                                $item->actual_weight ?? 0,
-                                $item->shipment_weight ?? '',
-                                $item->weight_discrepancy,
-                                $item->billed_rate,
-                                $item->agreed_rate,
-                                $item->billed_total,
-                                $item->isUnverified() ? 'Belum terverifikasi' : $item->approvedAmount(),
-                                $item->correctionAmount(),
-                                $item->checkLabel(),
-                                $item->shipmentMatchLabel(),
-                                implode(' | ', array_filter([
-                                    $item->isManuallyApproved() ? 'Disetujui manual: '.$item->manual_note : null,
-                                    $item->audit_notes,
-                                ])),
-                            ]);
-                        }
-
-                        fclose($output);
-                    }, $filename, [
-                        'Content-Type' => 'text/csv; charset=UTF-8',
-                    ]);
-                }),
+                ->action(fn (FreightReconciliationExporter $exporter): StreamedResponse => $exporter->downloadDispute($this->record)),
 
             Action::make('approve')
                 ->label('Setujui Pembayaran')

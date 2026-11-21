@@ -14,6 +14,7 @@ use App\Models\ExpeditionRateCard;
 use App\Models\FreightInvoice;
 use App\Models\FreightInvoiceItem;
 use App\Models\User;
+use App\Services\FreightReconciliationExporter;
 use App\Services\FreightReconciliationService;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Database\Seeders\ExpeditionRateCardSeeder;
@@ -26,8 +27,10 @@ use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\XLSX\Writer;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Tests\TestCase;
 
 class FreightReconciliationTest extends TestCase
@@ -981,6 +984,85 @@ class FreightReconciliationTest extends TestCase
         $this->assertSame($shipment->id, $item->csa_shipment_id);
         $this->assertSame('matched', $item->shipment_match_status);
         $this->assertSame('2610000010', $item->no_sj);
+    }
+
+    public function test_invoice_actions_export_clean_excel_files(): void
+    {
+        $role = Role::firstOrCreate(['name' => Utils::getSuperAdminName(), 'guard_name' => 'web']);
+        $role->givePermissionTo(Permission::firstOrCreate(['name' => 'View:FreightInvoice', 'guard_name' => 'web']));
+        $admin = User::factory()->create();
+        $admin->assignRole($role);
+        $this->actingAs($admin);
+
+        $invoice = FreightInvoice::create([
+            'expedition_id' => $this->expedition->id,
+            'invoice_number' => 'INV-TEST-EXP',
+            'origin_depo' => 'JAKARTA',
+            'invoice_date' => '2026-10-19',
+            'total_items_count' => 1,
+            'matched_count' => 0,
+            'discrepancy_count' => 1,
+            'unrecognized_count' => 0,
+            'total_billed_amount' => 50000,
+            'total_approved_amount' => 40000,
+            'total_discrepancy_amount' => 10000,
+            'total_unverified_amount' => 0,
+        ]);
+
+        $invoice->items()->create([
+            'no_resi_awb' => '00740201326',
+            'no_sj' => '2609000545',
+            'shipment_nominal_sj' => 52404000,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'BANDUNG',
+            'service_type' => 'DARAT',
+            'billed_weight' => 10,
+            'actual_weight' => 10,
+            'shipment_weight' => 10,
+            'weight_discrepancy' => 0,
+            'billed_rate' => 5000,
+            'agreed_rate' => 4000,
+            'billed_insurance' => 0,
+            'billed_total' => 50000,
+            'discrepancy_amount' => 10000,
+            'audit_status' => 'discrepancy_rate',
+        ]);
+
+        $exporter = new FreightReconciliationExporter;
+
+        // 1. Full Reconciliation Export (.xlsx)
+        $response = $exporter->downloadFull($invoice);
+        $this->assertInstanceOf(StreamedResponse::class, $response);
+        $this->assertStringContainsString('Hasil_Rekonsiliasi_INV-TEST-EXP.xlsx', (string) $response->headers->get('content-disposition'));
+
+        ob_start();
+        $response->sendContent();
+        $content = (string) ob_get_clean();
+        $this->assertSame('504b0304', bin2hex(substr($content, 0, 4)));
+
+        $temp = tempnam(sys_get_temp_dir(), 'rec_full_');
+        file_put_contents($temp, $content);
+        $sheet = IOFactory::load($temp)->getActiveSheet();
+        $this->assertSame('00740201326', $sheet->getCell('B2')->getValue());
+        $this->assertSame('2609000545', $sheet->getCell('C2')->getValue());
+        @unlink($temp);
+
+        // 2. Dispute Export (.xlsx)
+        $disputeResponse = $exporter->downloadDispute($invoice);
+        $this->assertInstanceOf(StreamedResponse::class, $disputeResponse);
+        $this->assertStringContainsString('Berita_Acara_Koreksi_Tagihan_INV-TEST-EXP.xlsx', (string) $disputeResponse->headers->get('content-disposition'));
+
+        ob_start();
+        $disputeResponse->sendContent();
+        $disputeContent = (string) ob_get_clean();
+        $this->assertSame('504b0304', bin2hex(substr($disputeContent, 0, 4)));
+
+        $tempDispute = tempnam(sys_get_temp_dir(), 'rec_disp_');
+        file_put_contents($tempDispute, $disputeContent);
+        $sheetDispute = IOFactory::load($tempDispute)->getActiveSheet();
+        $this->assertSame('00740201326', $sheetDispute->getCell('B2')->getValue());
+        $this->assertSame('2609000545', $sheetDispute->getCell('C2')->getValue());
+        @unlink($tempDispute);
     }
 
     /**

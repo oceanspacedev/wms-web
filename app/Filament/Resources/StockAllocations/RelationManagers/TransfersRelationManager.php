@@ -8,6 +8,7 @@ use App\Models\StockAllocationLine;
 use App\Models\StockAllocationTransfer;
 use App\Models\StockMutation;
 use App\Services\StockAllocationService;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
@@ -16,6 +17,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Support\Enums\Alignment;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -33,6 +35,8 @@ class TransfersRelationManager extends RelationManager
     protected static string $relationship = 'transfers';
 
     protected static ?string $title = 'Saran Transfer';
+
+    protected static string|BackedEnum|null $icon = Heroicon::OutlinedArrowsRightLeft;
 
     public function isReadOnly(): bool
     {
@@ -237,6 +241,8 @@ class TransfersRelationManager extends RelationManager
 
     /**
      * "GMBDG laku 21/hari, stok cukup 5 hari → kurang 530 unit untuk 30 hari. GMCRB stok cukup 300 hari → lebih 810 unit."
+     * "GMJKT (pusat): stok 1.632 ÷ laku 84/hari = cukup 19 hari. Target buffer 30 hari butuh 2.534 unit → kurang 902 unit.
+     * GMSBY: stok 1.845 ÷ laku 13/hari = cukup 138 hari. Target buffer 30 hari butuh 403 unit → lebih 1.442 unit aman dikirim."
      */
     public function reason(StockAllocationTransfer $transfer): string
     {
@@ -250,21 +256,32 @@ class TransfersRelationManager extends RelationManager
         $target = $this->ownerRecord->target_dos;
         // Satu desimal hanya untuk angka kecil yang memang pecahan: 2,5/hari, tapi 1/hari (bukan 1,0)
         $number = fn (float $value): string => number_format($value, $value < 10 && round($value, 1) != round($value) ? 1 : 0, ',', '.');
-        // Penerima & pengirim dijelaskan sama: stok berapa, laku berapa per hari, cukup berapa hari.
-        // Barang di jalan hanya ditulis untuk penerima, karena kelebihan pengirim dihitung dari stok fisik saja.
-        $cover = fn (StockAllocationLine $line, bool $withIncoming = false): string => 'stok '.$number((float) $line->stock)
-            .($withIncoming && $line->incoming > 0 ? ' (+'.$number($line->incoming).' di jalan)' : '')
-            .', '.($line->dos_before === null
-                ? 'tidak laku'
-                : 'laku '.$number((float) $line->avg_daily_sales).'/hari, cukup '.StockAllocationResource::days($line->dos_before).' hari');
-        $extra = max(0, (int) floor($from->stock - $target * (float) $from->avg_daily_sales));
-
         $hub = fn (StockAllocationLine $line): string => $line->region === StockAllocationService::HUB_REGION ? ' (pusat)' : '';
+        // Hitungan Penerima (Tujuan)
+        $toStock = (float) $to->stock;
+        $toLaku = (float) $to->avg_daily_sales;
+        $toIncoming = (float) $to->incoming;
+        $toEffectiveStock = $toStock + $toIncoming;
+        $toTargetQty = ceil($target * $toLaku);
+        $toDays = $to->dos_before !== null ? StockAllocationResource::days($to->dos_before).' hari' : 'tidak laku';
 
-        return $to->warehouse.$hub($to).' '.$cover($to, withIncoming: true)
-            .' → kurang '.$number($to->need_qty).' unit untuk '.$target.' hari. '
-            .$from->warehouse.$hub($from).' '.$cover($from)
-            .' → lebih '.$number($extra).' unit.';
+        $toText = $to->warehouse.$hub($to).': stok '.$number($toStock)
+            .($toIncoming > 0 ? ' (+'.$number($toIncoming).' di jalan = '.$number($toEffectiveStock).')' : '')
+            .($toLaku > 0 ? ' ÷ laku '.$number($toLaku).'/hari = cukup '.$toDays : ' (tidak laku)')
+            .'. Target buffer '.$target.' hari butuh '.$number($toTargetQty).' unit → kurang '.$number($to->need_qty).' unit.';
+
+        // Hitungan Pengirim (Asal)
+        $fromStock = (float) $from->stock;
+        $fromLaku = (float) $from->avg_daily_sales;
+        $fromTargetQty = ceil($target * $fromLaku);
+        $fromDays = $from->dos_before !== null ? ($from->dos_before > 365 ? '>1 tahun' : StockAllocationResource::days($from->dos_before).' hari') : 'tidak laku';
+        $extra = max(0, (int) floor($fromStock - $target * $fromLaku));
+
+        $fromText = $from->warehouse.$hub($from).': stok '.$number($fromStock)
+            .($fromLaku > 0 ? ' ÷ laku '.$number($fromLaku).'/hari = cukup '.$fromDays : ' (tidak laku)')
+            .'. Target buffer '.$target.' hari butuh '.$number($fromTargetQty).' unit → lebih '.$number($extra).' unit aman dikirim.';
+
+        return $toText.' '.$fromText;
     }
 
     /**
