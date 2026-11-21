@@ -84,14 +84,29 @@ class ViewStockAllocation extends ViewRecord
     {
         return [
             ActionGroup::make([
-                Action::make('howItWorks')
-                    ->label('Cara Hitung')
-                    ->icon('heroicon-o-information-circle')
-                    ->modalHeading('Cara Hitung Alokasi Stok')
-                    ->modalContent(fn (): HtmlString => $this->explanation())
-                    ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Tutup')
-                    ->modalWidth(Width::Large),
+                // Setujui seluruh saran transfer yang masih pending sekaligus
+                Action::make('approveAll')
+                    ->label('Setujui Semua Saran')
+                    ->icon('heroicon-o-check-badge')
+                    ->color('success')
+                    ->visible(fn (): bool => (auth()->user()?->can('update', $this->record) ?? false)
+                        && $this->record->transfers()->where('status', StockAllocationTransfer::STATUS_PENDING)->exists())
+                    ->requiresConfirmation()
+                    ->modalHeading('Setujui Semua Saran Transfer')
+                    ->modalDescription(fn (): string => 'Apakah Anda yakin ingin menyetujui seluruh '.$this->record->transfers()->where('status', StockAllocationTransfer::STATUS_PENDING)->count().' saran transfer yang belum diputuskan?')
+                    ->modalSubmitActionLabel('Ya, Setujui Semua')
+                    ->action(function (): void {
+                        $pending = $this->record->transfers()->where('status', StockAllocationTransfer::STATUS_PENDING)->get();
+                        app(StockAllocationService::class)->decide($this->record, $pending, StockAllocationTransfer::STATUS_APPROVED, auth()->id());
+
+                        Notification::make()
+                            ->title($pending->count().' saran transfer berhasil disetujui')
+                            ->success()
+                            ->send();
+
+                        $this->record->refresh();
+                        $this->dispatch('stock-allocation-updated');
+                    }),
 
                 // Saran yang disetujui → dokumen mutasi per rute (tab Dokumen Mutasi)
                 Action::make('createMutations')
@@ -114,6 +129,15 @@ class ViewStockAllocation extends ViewRecord
 
                         $this->redirect(StockAllocationResource::getUrl('view', ['record' => $this->record, 'activeRelationManager' => 2]));
                     }),
+
+                Action::make('howItWorks')
+                    ->label('Cara Hitung')
+                    ->icon('heroicon-o-information-circle')
+                    ->modalHeading('Cara Hitung Alokasi Stok')
+                    ->modalContent(fn (): HtmlString => $this->explanation())
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Tutup')
+                    ->modalWidth(Width::Large),
 
                 ExportAllocationAction::make(),
 

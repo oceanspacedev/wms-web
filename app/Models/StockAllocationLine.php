@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Posisi stok satu SKU di satu gudang: stok, incoming, penjualan, DOS sebelum/sesudah transfer, dan sisa PO.
@@ -83,6 +84,22 @@ class StockAllocationLine extends Model
     public function allocation(): BelongsTo
     {
         return $this->belongsTo(StockAllocation::class, 'stock_allocation_id');
+    }
+
+    /**
+     * @return HasMany<StockAllocationTransfer, $this>
+     */
+    public function transfersIn(): HasMany
+    {
+        return $this->hasMany(StockAllocationTransfer::class, 'to_line_id');
+    }
+
+    /**
+     * @return HasMany<StockAllocationTransfer, $this>
+     */
+    public function transfersOut(): HasMany
+    {
+        return $this->hasMany(StockAllocationTransfer::class, 'from_line_id');
     }
 
     public function stockAfter(): int
