@@ -18,6 +18,7 @@ use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class CheckTariff extends Page
 {
@@ -179,9 +180,8 @@ class CheckTariff extends Page
                                 ->helperText('Untuk hitung asuransi & % ongkir.'),
 
                             Select::make('service')
-                                ->label('Service')
+                                ->label('Layanan')
                                 ->options([
-                                    '' => 'Semua Service',
                                     'DARAT' => 'DARAT',
                                     'UDARA' => 'UDARA',
                                     'LAUT' => 'LAUT',
@@ -194,19 +194,13 @@ class CheckTariff extends Page
     }
 
     /**
-     * Dapatkan daftar kota asal (utamakan master data ExpeditionRateCard).
+     * Dapatkan daftar kota asal (utamakan master data ExpeditionRateCard, di-cache per versi).
      *
      * @return array<string, string>
      */
     public function getOriginOptions(): array
     {
-        $rateCardOrigins = ExpeditionRateCard::where('is_active', true)
-            ->whereNotNull('origin_depo')
-            ->where('origin_depo', '!=', '')
-            ->distinct()
-            ->orderBy('origin_depo')
-            ->pluck('origin_depo', 'origin_depo')
-            ->toArray();
+        $rateCardOrigins = $this->cachedMasterOrigins();
 
         if (! empty($rateCardOrigins)) {
             return $rateCardOrigins;
@@ -219,7 +213,7 @@ class CheckTariff extends Page
     }
 
     /**
-     * Dapatkan daftar kota tujuan berdasarkan kota asal (utamakan master data ExpeditionRateCard).
+     * Dapatkan daftar kota tujuan berdasarkan kota asal (utamakan master data ExpeditionRateCard, di-cache per versi).
      *
      * @return array<string, string>
      */
@@ -230,15 +224,19 @@ class CheckTariff extends Page
         }
 
         $upperOrigin = strtoupper(trim($origin));
+        $version = ExpeditionRateCard::routeCacheVersion();
+        $cacheKey = "rate_cards:dests:v{$version}:".md5($upperOrigin);
 
-        $rateCardDestinations = ExpeditionRateCard::where('is_active', true)
-            ->where('origin_depo', $upperOrigin)
-            ->whereNotNull('destination_city')
-            ->where('destination_city', '!=', '')
-            ->distinct()
-            ->orderBy('destination_city')
-            ->pluck('destination_city', 'destination_city')
-            ->toArray();
+        $rateCardDestinations = Cache::remember($cacheKey, 3600, function () use ($upperOrigin): array {
+            return ExpeditionRateCard::where('is_active', true)
+                ->where('origin_depo', $upperOrigin)
+                ->whereNotNull('destination_city')
+                ->where('destination_city', '!=', '')
+                ->distinct()
+                ->orderBy('destination_city')
+                ->pluck('destination_city', 'destination_city')
+                ->toArray();
+        });
 
         if (! empty($rateCardDestinations)) {
             return $rateCardDestinations;
@@ -251,7 +249,26 @@ class CheckTariff extends Page
     }
 
     /**
-     * Query data tarif dari master database ExpeditionRateCard.
+     * @return array<string, string>
+     */
+    protected function cachedMasterOrigins(): array
+    {
+        $version = ExpeditionRateCard::routeCacheVersion();
+
+        return Cache::remember("rate_cards:origins:v{$version}", 3600, function (): array {
+            return ExpeditionRateCard::where('is_active', true)
+                ->whereNotNull('origin_depo')
+                ->where('origin_depo', '!=', '')
+                ->distinct()
+                ->orderBy('origin_depo')
+                ->pluck('origin_depo', 'origin_depo')
+                ->toArray();
+        });
+    }
+
+    /**
+     * Query data tarif dari master database ExpeditionRateCard menggunakan composite index
+     * `(is_active, origin_depo, destination_city, service_type)` agar tidak full-table scan.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -259,24 +276,68 @@ class CheckTariff extends Page
     {
         $orig = strtoupper(trim($origin));
         $dest = strtoupper(trim($destination));
+        $serviceFilter = (! empty($selectedService) && strtoupper($selectedService) !== 'ALL')
+            ? strtoupper(trim($selectedService))
+            : null;
 
-        $query = ExpeditionRateCard::with('expedition')
-            ->where('is_active', true)
-            ->where(function ($q) use ($orig) {
-                $q->where('origin_depo', $orig)
-                    ->orWhere('origin_depo', 'LIKE', "%{$orig}%");
-            })
-            ->where(function ($q) use ($dest) {
-                $q->where('destination_city', $dest)
-                    ->orWhere('destination_city', 'LIKE', "%{$dest}%")
-                    ->orWhere('destination_district', 'LIKE', "%{$dest}%");
-            });
+        $allOrigins = array_values($this->cachedMasterOrigins());
+        $matchingOrigins = array_values(array_filter(
+            $allOrigins,
+            fn (string $candidate): bool => $candidate === $orig || str_contains($candidate, $orig),
+        ));
 
-        if (! empty($selectedService) && strtoupper($selectedService) !== 'ALL') {
-            $query->where('service_type', strtoupper(trim($selectedService)));
+        if ($matchingOrigins === []) {
+            return [];
         }
 
-        $records = $query->get();
+        $version = ExpeditionRateCard::routeCacheVersion();
+        $destCacheKey = "rate_cards:dests_group:v{$version}:".md5(implode('|', $matchingOrigins));
+
+        /** @var list<string> $availableDestinations */
+        $availableDestinations = Cache::remember($destCacheKey, 3600, function () use ($matchingOrigins): array {
+            return ExpeditionRateCard::where('is_active', true)
+                ->whereIn('origin_depo', $matchingOrigins)
+                ->whereNotNull('destination_city')
+                ->where('destination_city', '!=', '')
+                ->distinct()
+                ->pluck('destination_city')
+                ->all();
+        });
+
+        $matchingDestinations = array_values(array_filter(
+            $availableDestinations,
+            fn (string $candidate): bool => $candidate === $dest || str_contains($candidate, $dest),
+        ));
+
+        $records = collect();
+
+        if ($matchingDestinations !== []) {
+            $query = ExpeditionRateCard::with('expedition')
+                ->where('is_active', true)
+                ->whereIn('origin_depo', $matchingOrigins)
+                ->whereIn('destination_city', $matchingDestinations);
+
+            if ($serviceFilter !== null) {
+                $query->where('service_type', $serviceFilter);
+            }
+
+            $records = $query->get();
+        }
+
+        // Fallback pencarian kecamatan (masih memanfaatkan index origin_depo)
+        if ($records->isEmpty()) {
+            $query = ExpeditionRateCard::with('expedition')
+                ->where('is_active', true)
+                ->whereIn('origin_depo', $matchingOrigins)
+                ->where('destination_district', 'LIKE', "%{$dest}%");
+
+            if ($serviceFilter !== null) {
+                $query->where('service_type', $serviceFilter);
+            }
+
+            $records = $query->get();
+        }
+
         if ($records->isEmpty()) {
             return [];
         }
@@ -284,28 +345,33 @@ class CheckTariff extends Page
         // Group by expedition and service to select best rate
         $grouped = [];
         foreach ($records as $rc) {
+            // Tarif dokumen (DOC) tidak dicampur saat cek kargo > 1 KG
+            if ($rc->pricing_type === ExpeditionRateCard::PRICING_DOC && $weight > 1.0) {
+                continue;
+            }
+
             $expName = $rc->expedition?->name ?: 'UMUM';
             $srv = strtoupper(trim($rc->service_type ?: 'DARAT'));
             $minKgVal = (float) $rc->min_kg;
-            $isFlat = $minKgVal == 0;
+            $isFlat = $rc->isFlatPricing();
             $rate = (float) $rc->rate_per_kg;
-
-            $chargeableWeight = max($weight, $minKgVal > 0 ? $minKgVal : 1.0);
-            $totalCost = $isFlat ? $rate : ($chargeableWeight * $rate);
+            $totalCost = $rc->calculateShippingCost($weight);
 
             $key = $expName.'|'.$srv;
             if (! isset($grouped[$key]) || $totalCost < $grouped[$key]['total_cost']) {
-                $minKgLabel = $minKgVal > 0 ? (string) round($minKgVal) : '0';
+                $minKgLabel = $isFlat ? '–' : ((string) round(max(1.0, $minKgVal)).' KG');
                 $grouped[$key] = [
                     'expedition' => $expName,
                     'service' => $srv,
-                    'min_kg' => $minKgLabel.' KG',
-                    'min_kg_val' => $minKgVal,
+                    'min_kg' => $minKgLabel,
+                    'min_kg_val' => $isFlat ? 0.0 : max(1.0, $minKgVal),
                     'is_flat' => $isFlat,
+                    'pricing_type' => $rc->pricing_type ?: ExpeditionRateCard::PRICING_PER_KG,
+                    'pricing_badge' => $rc->pricingBadge(),
                     'rate_per_kg' => $rate,
                     'total_cost' => $totalCost,
                     'lead_time' => ! empty($rc->sla_days) ? $rc->sla_days.' HARI' : 'Reguler',
-                    'insurance_percent' => (float) ($rc->insurance_rate_percent ?: 0.2),
+                    'insurance_percent' => $rc->insurance_rate_percent !== null ? (float) $rc->insurance_rate_percent : 0.2,
                     'notes' => $rc->notes ?: '',
                     'districts' => $rc->destination_district ? [$rc->destination_district] : [],
                 ];
@@ -526,7 +592,9 @@ class CheckTariff extends Page
             $totalCost = $biayaOngkir + $biayaAsuransi;
             $pctAmount = $totalAmount > 0 ? round(($totalCost / $totalAmount) * 100, 1) : 0.0;
 
-            $minKgLabel = $minKgVal > 0 ? (string) round($minKgVal) : '0';
+            $minKgLabel = $isFlat ? '–' : ($minKgVal > 0 ? (string) round($minKgVal) : '1');
+            $pricingType = (string) ($r['pricing_type'] ?? ($isFlat ? ExpeditionRateCard::PRICING_FLAT : ExpeditionRateCard::PRICING_PER_KG));
+            $pricingBadge = (string) ($r['pricing_badge'] ?? (ExpeditionRateCard::PRICING_BADGES[$pricingType] ?? '/KG'));
 
             $enriched[] = [
                 'expedition' => $exp,
@@ -535,6 +603,8 @@ class CheckTariff extends Page
                 'rate_per_kg' => $ratePerKg,
                 'min_kg' => $minKgLabel,
                 'min_kg_val' => $minKgVal,
+                'pricing_type' => $pricingType,
+                'pricing_badge' => $pricingBadge,
                 'insurance_percent' => $insPercent,
                 'biaya_asuransi' => $biayaAsuransi,
                 'biaya_ongkir' => $biayaOngkir,

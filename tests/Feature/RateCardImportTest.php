@@ -94,7 +94,34 @@ class RateCardImportTest extends TestCase
             'service_type' => 'DARAT',
             'rate_per_kg' => 2500,
             'min_kg' => 10,
+            'pricing_type' => ExpeditionRateCard::PRICING_PER_KG,
         ]);
+    }
+
+    public function test_import_classifies_pricing_types_for_colly_kubikasi_doc_flat_and_zero_min_kg(): void
+    {
+        $csvContent = implode("\n", [
+            'Expedisi,Origin,Provinsi,Kota Tujuan/District,Kecamatan Tujuan/District,/Kg, Price,Lead Time, Service, Kode, KET',
+            'KARYA MANDIRI,CIREBON,DKI,JAKARTA,JAKARTA,/COLLY,150000,1 HARI,DARAT,,',
+            'SINAR PAPUA,JAKARTA,PAPUA,JAYAPURA,JAYAPURA,/KUBIKASI,2300000,8 HARI,LAUT,,',
+            '21 EXPRES,CIREBON,DKI,JAKARTA,JAKARTA,DOC,11000,1 HARI,DARAT,,',
+            '21 EXPRES,CIREBON,NTB,MATARAM,MATARAM,0 KG,36000,2 HARI,UDARA,,',
+            'J&T CARGO,KAB CIREBON,DKI,JAKARTA BARAT,JAKARTA BARAT,0 KG,45000,1-3 HARI,DARAT,,LTL',
+        ]);
+
+        $tempFile = tempnam(sys_get_temp_dir(), 'test_pricing_types_').'.csv';
+        file_put_contents($tempFile, $csvContent);
+
+        $result = app(RateCardImportService::class)->importFile($tempFile, 'upsert', 0.2);
+
+        @unlink($tempFile);
+
+        $this->assertTrue($result['success']);
+        $this->assertDatabaseHas('expedition_rate_cards', ['destination_city' => 'JAKARTA', 'rate_per_kg' => 150000, 'pricing_type' => ExpeditionRateCard::PRICING_PER_COLLY, 'min_kg' => 0]);
+        $this->assertDatabaseHas('expedition_rate_cards', ['destination_city' => 'JAYAPURA', 'rate_per_kg' => 2300000, 'pricing_type' => ExpeditionRateCard::PRICING_KUBIKASI, 'min_kg' => 0]);
+        $this->assertDatabaseHas('expedition_rate_cards', ['destination_city' => 'JAKARTA', 'rate_per_kg' => 11000, 'pricing_type' => ExpeditionRateCard::PRICING_DOC, 'min_kg' => 0]);
+        $this->assertDatabaseHas('expedition_rate_cards', ['destination_city' => 'MATARAM', 'rate_per_kg' => 36000, 'pricing_type' => ExpeditionRateCard::PRICING_PER_KG, 'min_kg' => 1]);
+        $this->assertDatabaseHas('expedition_rate_cards', ['destination_city' => 'JAKARTA BARAT', 'rate_per_kg' => 45000, 'pricing_type' => ExpeditionRateCard::PRICING_FLAT, 'min_kg' => 0]);
     }
 
     public function test_check_tariff_prioritizes_imported_expedition_rate_cards(): void

@@ -1065,6 +1065,100 @@ class FreightReconciliationTest extends TestCase
         @unlink($tempDispute);
     }
 
+    public function test_sentral_cargo_separate_insurance_and_rax_flat_under_min_kg_and_doc_and_csv_subheader(): void
+    {
+        $sentral = Expedition::create(['name' => 'SENTRAL CARGO', 'code' => 'SENTRAL', 'is_active' => true]);
+        ExpeditionRateCard::create([
+            'expedition_id' => $sentral->id,
+            'origin_depo' => 'PURWOKERTO',
+            'destination_city' => 'CIREBON',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 4000,
+            'min_kg' => 10,
+            'is_active' => true,
+        ]);
+
+        $sentralInvoice = FreightInvoice::create([
+            'expedition_id' => $sentral->id,
+            'invoice_number' => '00863411',
+            'invoice_date' => '2026-10-31',
+            'origin_city' => 'PURWOKERTO',
+            'status' => 'processing',
+        ]);
+
+        $service = new FreightReconciliationService;
+        $sentralResult = $service->reconcile($sentralInvoice, [[
+            'no_resi_awb' => '00740201326',
+            'origin_depo' => 'Purwokerto',
+            'destination_city' => 'D-Pekalipan, Cirebon',
+            'billed_weight' => 25.0,
+            'billed_rate' => 4000.0,
+            'billed_insurance' => 196300.0,
+            'billed_total' => 100000.0,
+        ]]);
+
+        $sentralItem = $sentralResult->items->sole();
+        $this->assertSame('matched', $sentralItem->audit_status);
+        $this->assertEquals(296300.0, (float) $sentralItem->billed_total);
+        $this->assertEquals(296300.0, (float) $sentralResult->total_approved_amount);
+
+        // RAX: paket 2 kg flat Rp 7.000 lebih murah dari minimal kontrak (3 kg × Rp 3.300 = Rp 9.900) → tetap matched
+        $rax = Expedition::firstOrCreate(['code' => 'RAX'], ['name' => 'RAX', 'is_active' => true]);
+        ExpeditionRateCard::create([
+            'expedition_id' => $rax->id,
+            'origin_depo' => 'BANDUNG',
+            'destination_city' => 'KADUNGORA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 3300,
+            'min_kg' => 3,
+            'is_active' => true,
+        ]);
+
+        $raxInvoice = FreightInvoice::create([
+            'expedition_id' => $rax->id,
+            'invoice_number' => 'INV-RAX-FLAT',
+            'invoice_date' => '2026-09-30',
+            'origin_city' => 'BANDUNG',
+            'status' => 'processing',
+        ]);
+
+        $raxResult = $service->reconcile($raxInvoice, [[
+            'no_resi_awb' => 'GRT0536680',
+            'origin_depo' => 'BANDUNG',
+            'destination_city' => 'KADUNGORA',
+            'billed_weight' => 2.0,
+            'billed_rate' => 0.0,
+            'billed_total' => 7000.0,
+        ]]);
+
+        $raxItem = $raxResult->items->sole();
+        $this->assertSame('matched', $raxItem->audit_status);
+        $this->assertEquals(0.0, (float) $raxItem->discrepancy_amount);
+
+        // RAX CSV: subheader 2 baris (AWWY ABILL + PENERIMA/KOTA) dan berat DOC
+        $csvPath = sys_get_temp_dir().DIRECTORY_SEPARATOR.uniqid('rax_momoyo_').'.csv';
+        file_put_contents($csvPath, implode("\n", [
+            'No.,AWWY ABILL,TANGGAL,PENGIRIM,TUJUAN,,COLLY,BERAT (Kg),HARGA,JUMLAH',
+            ',,,,PENERIMA,KOTA,,,PER KILO,',
+            '1,956070,2026-09-04,MOMOYO TANGERANG,MOMOYO,CIREBON,11,196,2000,392000',
+            '2,BDO0071331,2026-09-28,CV COMPLETE,GUDANG TOP,BANDUNG,1,DOC,0,10000',
+            ',,,,,,,,Total,402000',
+        ]));
+
+        try {
+            $parsed = $service->parseInvoiceFile($csvPath);
+            $this->assertCount(2, $parsed);
+            $this->assertSame('956070', $parsed[0]['no_resi_awb']);
+            $this->assertSame('MOMOYO', $parsed[0]['recipient_name']);
+            $this->assertSame('CIREBON', $parsed[0]['destination_city']);
+            $this->assertSame('BDO0071331', $parsed[1]['no_resi_awb']);
+            $this->assertSame(1.0, $parsed[1]['billed_weight']);
+            $this->assertSame('DOC', $parsed[1]['service_type']);
+        } finally {
+            @unlink($csvPath);
+        }
+    }
+
     /**
      * @param  list<list<mixed>>  $rows
      */

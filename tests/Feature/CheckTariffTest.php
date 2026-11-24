@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Filament\Pages\CheckTariff;
+use App\Models\Expedition;
+use App\Models\ExpeditionRateCard;
 use App\Models\TariffSearchHistory;
 use App\Models\User;
 use App\Services\FreightRateGoogleSheetService;
@@ -325,6 +327,89 @@ class CheckTariffTest extends TestCase
         foreach ($rates as $r) {
             $this->assertNotSame('UDARA', $r['service']);
         }
+    }
+
+    public function test_per_kg_rate_with_zero_min_kg_is_multiplied_by_weight_and_doc_is_excluded_for_cargo(): void
+    {
+        $exp21 = Expedition::create(['name' => '21 EXPRES', 'code' => '21EXP', 'is_active' => true]);
+        $rax = Expedition::create(['name' => 'RAX', 'code' => 'RAX', 'is_active' => true]);
+        $karya = Expedition::create(['name' => 'KARYA MANDIRI', 'code' => 'KARYA', 'is_active' => true]);
+
+        // 21 EXPRES: per_kg dengan min_kg = 0 harus tetap dikali 10 KG (= 110.000), bukan flat 11.000
+        ExpeditionRateCard::create([
+            'expedition_id' => $exp21->id,
+            'origin_depo' => 'CIREBON',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 11000,
+            'min_kg' => 0,
+            'pricing_type' => ExpeditionRateCard::PRICING_PER_KG,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1',
+            'is_active' => true,
+        ]);
+
+        // 21 EXPRES: tarif DOC tidak boleh muncul untuk pengiriman kargo 10 KG
+        ExpeditionRateCard::create([
+            'expedition_id' => $exp21->id,
+            'origin_depo' => 'CIREBON',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 9000,
+            'min_kg' => 0,
+            'pricing_type' => ExpeditionRateCard::PRICING_DOC,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1',
+            'is_active' => true,
+        ]);
+
+        // RAX: 2.000/kg × 10 KG = 20.000 (seharusnya Termurah)
+        ExpeditionRateCard::create([
+            'expedition_id' => $rax->id,
+            'origin_depo' => 'CIREBON',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 2000,
+            'min_kg' => 3,
+            'pricing_type' => ExpeditionRateCard::PRICING_PER_KG,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1-2',
+            'is_active' => true,
+        ]);
+
+        // KARYA MANDIRI: per koli flat 150.000
+        ExpeditionRateCard::create([
+            'expedition_id' => $karya->id,
+            'origin_depo' => 'CIREBON',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 150000,
+            'min_kg' => 0,
+            'pricing_type' => ExpeditionRateCard::PRICING_PER_COLLY,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1',
+            'is_active' => true,
+        ]);
+
+        $component = Livewire::actingAs($this->user)
+            ->test(CheckTariff::class)
+            ->set('data.origin', 'CIREBON')
+            ->set('data.destination', 'JAKARTA')
+            ->set('data.weight', 10)
+            ->set('data.service', '')
+            ->call('checkTariff')
+            ->assertSet('hasSearched', true)
+            ->assertSee('/Koli');
+
+        $rates = $component->get('rates');
+        $this->assertCount(3, $rates);
+        $this->assertSame('RAX', $rates[0]['expedition']);
+        $this->assertEquals(20000.0, $rates[0]['total_cost']);
+        $this->assertSame('21 EXPRES', $rates[1]['expedition']);
+        $this->assertEquals(110000.0, $rates[1]['total_cost']);
+        $this->assertSame('KARYA MANDIRI', $rates[2]['expedition']);
+        $this->assertEquals(150000.0, $rates[2]['total_cost']);
+        $this->assertTrue($rates[2]['is_flat']);
     }
 
     /**
