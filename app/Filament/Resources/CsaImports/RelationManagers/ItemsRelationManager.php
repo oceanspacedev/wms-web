@@ -4,8 +4,10 @@ namespace App\Filament\Resources\CsaImports\RelationManagers;
 
 use App\Models\CsaImport;
 use App\Models\CsaImportItem;
+use BackedEnum;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Support\Enums\Alignment;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
@@ -20,9 +22,13 @@ use Illuminate\Database\Eloquent\Model;
  */
 class ItemsRelationManager extends RelationManager
 {
+    protected static bool $isLazy = false;
+
     protected static string $relationship = 'items';
 
     protected static ?string $title = 'Penjualan per Barang';
+
+    protected static string|BackedEnum|null $icon = Heroicon::OutlinedShoppingBag;
 
     protected static ?string $modelLabel = 'Barang';
 
@@ -78,7 +84,6 @@ class ItemsRelationManager extends RelationManager
                 TextColumn::make('model')
                     ->label('Barang')
                     ->formatStateUsing(fn (CsaImportItem $record): string => $record->productLabel())
-                    ->tooltip(fn (CsaImportItem $record): string => $record->kode_barang.' · '.$record->nama_barang)
                     ->searchable(['nama_barang', 'kode_barang'])
                     ->wrap(),
                 TextColumn::make('warna')
