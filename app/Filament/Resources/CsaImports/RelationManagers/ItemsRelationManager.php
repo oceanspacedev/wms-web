@@ -160,9 +160,11 @@ class ItemsRelationManager extends RelationManager
      */
     private function rupiah(float $value): string
     {
+        $abs = abs($value);
+
         return match (true) {
-            $value >= 1_000_000_000 => 'Rp '.number_format($value / 1_000_000_000, 1, ',', '.').' M',
-            $value >= 1_000_000 => 'Rp '.number_format($value / 1_000_000, 0, ',', '.').' jt',
+            $abs >= 1_000_000_000 => 'Rp '.number_format($value / 1_000_000_000, 1, ',', '.').' M',
+            $abs >= 1_000_000 => 'Rp '.number_format($value / 1_000_000, 0, ',', '.').' jt',
             default => 'Rp '.number_format($value, 0, ',', '.'),
         };
     }

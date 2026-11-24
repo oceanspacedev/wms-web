@@ -87,6 +87,10 @@ class FreightReconciliationService
 
                 if ($billedTotal <= 0 && $billedRate > 0) {
                     $billedTotal = ($billedWeight * $billedRate) + $billedInsurance;
+                } elseif ($billedTotal > 0 && $billedInsurance > 0 && $billedRate > 0 && $billedWeight > 0
+                    && abs($billedTotal - ($billedWeight * $billedRate)) < 1.0) {
+                    // Pada template tertentu (mis. Sentral Cargo), kolom "Total" hanya berisi ongkir di luar kolom "Asuransi"
+                    $billedTotal = round($billedTotal + $billedInsurance, 2);
                 } elseif ($billedRate <= 0 && $billedTotal > 0 && $billedWeight > 0) {
                     $billedRate = round(($billedTotal - $billedInsurance) / $billedWeight, 2);
                 }
@@ -113,7 +117,6 @@ class FreightReconciliationService
                     if ($rateCard) {
                         $agreedRate = (float) $rateCard->rate_per_kg;
                         $matchedMinKg = max(1.0, (float) $rateCard->min_kg);
-                        $hasRateIssue = $billedRate > 0 && $billedRate > $agreedRate + 0.5;
                         $hasWeightIssue = false;
                         $chargeWeight = $billedWeight;
 
@@ -128,10 +131,19 @@ class FreightReconciliationService
                             }
                         }
 
+                        // Bandingkan ongkir dengan minimal tagihan kontrak (mis. paket flat 1–2 kg Rp 7.000 vs min 3 kg Rp 9.900 tetap Sesuai)
+                        $contractMinCost = round(max($chargeWeight, $matchedMinKg) * $agreedRate, 2);
+                        $billedShipping = max(0.0, $billedTotal - $billedInsurance);
+                        $hasRateIssue = $billedRate > 0
+                            && $billedRate > $agreedRate + 0.5
+                            && $billedShipping > $contractMinCost + 0.5;
+
                         if ($hasRateIssue) {
                             $auditNotes[] = 'Tarif Melebihi Kontrak: Ditagih Rp '.$this->rupiah($billedRate).'/kg vs Tarif Kontrak Rp '.$this->rupiah($agreedRate).'/kg (+Rp '.$this->rupiah($billedRate - $agreedRate).'/kg)';
                         } elseif ($billedRate > 0 && $billedRate < $agreedRate - 0.5) {
                             $auditNotes[] = 'Lebih murah dari Tarif Kontrak (Rp '.$this->rupiah($agreedRate).'/kg)';
+                        } elseif ($billedRate > $agreedRate + 0.5 && $billedShipping <= $contractMinCost + 0.5) {
+                            $auditNotes[] = "Sesuai: ongkir Rp {$this->rupiah($billedShipping)} tidak melebihi minimal kontrak ({$this->kg(max($chargeWeight, $matchedMinKg))} kg × Rp {$this->rupiah($agreedRate)} = Rp {$this->rupiah($contractMinCost)})";
                         }
 
                         $auditStatus = match (true) {
@@ -329,16 +341,45 @@ class FreightReconciliationService
         $rows = [];
         if (($handle = fopen($filePath, 'r')) !== false) {
             $header = null;
+            $isNextRowSubheader = false;
             while (($data = fgetcsv($handle, 2000, ',')) !== false) {
                 $joined = strtolower(implode(' ', $data));
                 if ($this->textLooksLikeInvoiceHeader($joined)) {
                     $header = array_values($this->normalizeHeaderColumns($data));
+                    $isNextRowSubheader = true;
 
                     continue;
                 }
 
                 if (! $header) {
                     continue;
+                }
+
+                if ($isNextRowSubheader) {
+                    $isNextRowSubheader = false;
+                    $hasDataIndicator = false;
+                    foreach ($data as $v) {
+                        if (is_numeric($v) && (float) $v > 100) {
+                            $hasDataIndicator = true;
+                            break;
+                        }
+                    }
+
+                    if (! $hasDataIndicator && (str_contains($joined, 'penerima') || str_contains($joined, 'kota') || str_contains($joined, 'kg') || str_contains($joined, 'kilo'))) {
+                        $subMap = array_values($this->normalizeHeaderColumns($data));
+                        foreach ($subMap as $col => $name) {
+                            $currentField = $this->fieldForHeader($header[$col] ?? '');
+                            $subField = $this->fieldForHeader($name);
+
+                            if ($currentField === null || ($currentField === 'destination_city' && $subField === 'recipient_name')) {
+                                $header[$col] = $name;
+                            } elseif ($subField === 'destination_city' && empty($header[$col])) {
+                                $header[$col] = $name;
+                            }
+                        }
+
+                        continue;
+                    }
                 }
 
                 $firstNonEmpty = strtolower(trim((string) (collect($data)->first(fn ($val) => trim((string) $val) !== '') ?? '')));
@@ -625,6 +666,16 @@ class FreightReconciliationService
             if ($field === 'koli') {
                 $koli = (float) str_replace(',', '.', $v);
                 $filled['koli'] = true;
+
+                continue;
+            }
+
+            if ($field === 'billed_weight' && in_array(strtoupper($v), ['DOC', 'DOKUMEN'], true)) {
+                $res['billed_weight'] = 1.0;
+                $filled['billed_weight'] = true;
+                if ($res['service_type'] === '') {
+                    $res['service_type'] = 'DOC';
+                }
 
                 continue;
             }

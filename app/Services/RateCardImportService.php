@@ -349,11 +349,12 @@ class RateCardImportService
 
         $expId = $this->resolveExpeditionId($expName, $expeditionCache);
         $serviceType = $this->normalizeServiceType($rawService);
-        $minKg = $this->parseMinKg($rawMinKg);
+        $pricingType = $this->parsePricingType($rawMinKg, $notes);
+        $minKg = $this->parseMinKg($rawMinKg, $pricingType);
         $slaDays = $this->cleanSlaDays($rawLeadTime);
 
         // Deduplication key
-        $key = "{$expId}|{$origin}|{$destinationCity}|{$destinationDistrict}|{$serviceType}|{$minKg}";
+        $key = "{$expId}|{$origin}|{$destinationCity}|{$destinationDistrict}|{$serviceType}|{$pricingType}|{$minKg}";
 
         $uniqueRecords[$key] = [
             'expedition_id' => $expId,
@@ -364,6 +365,7 @@ class RateCardImportService
             'service_type' => $serviceType,
             'rate_per_kg' => $price,
             'min_kg' => $minKg,
+            'pricing_type' => $pricingType,
             'insurance_rate_percent' => $defaultInsurancePercent,
             'sla_days' => $slaDays,
             'notes' => ! empty($notes) ? $notes : null,
@@ -442,6 +444,7 @@ class RateCardImportService
                     'destination_district',
                     'service_type',
                     'min_kg',
+                    'pricing_type',
                     'rate_per_kg',
                     'sla_days',
                     'notes',
@@ -452,8 +455,9 @@ class RateCardImportService
                 $existingMap = [];
                 foreach ($existing as $erc) {
                     $minKgFloat = (float) $erc->min_kg;
+                    $pricingType = (string) ($erc->pricing_type ?: ExpeditionRateCard::PRICING_PER_KG);
                     $dist = strtoupper(trim((string) ($erc->destination_district ?? '')));
-                    $k = "{$erc->expedition_id}|{$erc->origin_depo}|{$erc->destination_city}|{$dist}|{$erc->service_type}|{$minKgFloat}";
+                    $k = "{$erc->expedition_id}|{$erc->origin_depo}|{$erc->destination_city}|{$dist}|{$erc->service_type}|{$pricingType}|{$minKgFloat}";
                     $existingMap[$k] = $erc;
                 }
 
@@ -462,6 +466,7 @@ class RateCardImportService
                     if (isset($existingMap[$key])) {
                         $existingErc = $existingMap[$key];
                         $hasChanged = (float) $existingErc->rate_per_kg !== (float) $data['rate_per_kg']
+                            || (string) ($existingErc->pricing_type ?: ExpeditionRateCard::PRICING_PER_KG) !== (string) $data['pricing_type']
                             || (string) ($existingErc->sla_days ?? '') !== (string) ($data['sla_days'] ?? '')
                             || (string) ($existingErc->notes ?? '') !== (string) ($data['notes'] ?? '')
                             || (string) ($existingErc->province ?? '') !== (string) ($data['province'] ?? '')
@@ -496,6 +501,7 @@ class RateCardImportService
                 DB::statement('SET FOREIGN_KEY_CHECKS=1;');
             }
             DB::commit();
+            ExpeditionRateCard::clearRouteCache();
         } catch (Exception $e) {
             DB::rollBack();
             if ($isMysql) {
@@ -645,18 +651,50 @@ class RateCardImportService
     }
 
     /**
-     * Parse minimum KG from string like "10 KG", "FLAT", "1 KG".
+     * Tentukan jenis perhitungan tarif dari kolom /Kg & catatan ekspedisi agar tidak tertukar dengan min_kg = 0.
      */
-    protected function parseMinKg(string $str): float
+    protected function parsePricingType(string $str, string $notes = ''): string
     {
         $upper = strtoupper(trim($str));
 
-        if (in_array($upper, ['FLAT', '/COLLY', 'DOC', '/KUBIKASI'])) {
+        if (str_contains($upper, 'COLLY') || str_contains($upper, 'KOLI')) {
+            return ExpeditionRateCard::PRICING_PER_COLLY;
+        }
+
+        if (str_contains($upper, 'KUBIK') || str_contains($upper, 'CBM')) {
+            return ExpeditionRateCard::PRICING_KUBIKASI;
+        }
+
+        if ($upper === 'DOC' || str_contains($upper, 'DOKUMEN')) {
+            return ExpeditionRateCard::PRICING_DOC;
+        }
+
+        if (str_contains($upper, 'FLAT')) {
+            return ExpeditionRateCard::PRICING_FLAT;
+        }
+
+        if (strtoupper(trim($notes)) === 'LTL' && ($upper === '0' || $upper === '0 KG')) {
+            return ExpeditionRateCard::PRICING_FLAT;
+        }
+
+        return ExpeditionRateCard::PRICING_PER_KG;
+    }
+
+    /**
+     * Parse minimum KG from string like "10 KG", "FLAT", "1 KG".
+     */
+    protected function parseMinKg(string $str, string $pricingType = ExpeditionRateCard::PRICING_PER_KG): float
+    {
+        if ($pricingType !== ExpeditionRateCard::PRICING_PER_KG) {
             return 0.0;
         }
 
+        $upper = strtoupper(trim($str));
+
         if (preg_match('/(\d+(?:\.\d+)?)/', $upper, $matches)) {
-            return (float) $matches[1];
+            $value = (float) $matches[1];
+
+            return $value > 0 ? $value : 1.0;
         }
 
         return 1.0;

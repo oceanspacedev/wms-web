@@ -34,6 +34,8 @@ class ExpeditionRateCardResource extends Resource
 
     protected static ?string $modelLabel = 'Tarif Kontrak PKS';
 
+    protected static ?string $pluralModelLabel = 'Tarif Kontrak PKS';
+
     protected static ?int $navigationSort = 2;
 
     public static function form(Schema $schema): Schema
@@ -57,9 +59,15 @@ class ExpeditionRateCardResource extends Resource
                     ->required()
                     ->numeric(),
                 TextInput::make('min_kg')
+                    ->label('Min KG')
                     ->required()
                     ->numeric()
                     ->default(1),
+                Select::make('pricing_type')
+                    ->label('Jenis Tarif')
+                    ->options(ExpeditionRateCard::PRICING_LABELS)
+                    ->default(ExpeditionRateCard::PRICING_PER_KG)
+                    ->required(),
                 TextInput::make('insurance_rate_percent')
                     ->required()
                     ->numeric()
@@ -112,7 +120,20 @@ class ExpeditionRateCardResource extends Resource
                     ->sortable(),
                 TextColumn::make('min_kg')
                     ->label('Min KG')
-                    ->formatStateUsing(fn ($state): string => rtrim(rtrim(number_format((float) $state, 1, ',', '.'), '0'), ',').' KG')
+                    ->formatStateUsing(fn ($state, ExpeditionRateCard $record): string => $record->isFlatPricing()
+                        ? '–'
+                        : rtrim(rtrim(number_format((float) $state, 1, ',', '.'), '0'), ',').' KG')
+                    ->sortable(),
+                TextColumn::make('pricing_type')
+                    ->label('Jenis')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => ExpeditionRateCard::PRICING_LABELS[$state] ?? 'Per KG')
+                    ->color(fn (?string $state): string => match ($state) {
+                        ExpeditionRateCard::PRICING_FLAT, ExpeditionRateCard::PRICING_PER_COLLY => 'warning',
+                        ExpeditionRateCard::PRICING_KUBIKASI => 'info',
+                        ExpeditionRateCard::PRICING_DOC => 'gray',
+                        default => 'success',
+                    })
                     ->sortable(),
                 TextColumn::make('sla_days')
                     ->label('SLA')
@@ -152,6 +173,9 @@ class ExpeditionRateCardResource extends Resource
                         'UDARA' => 'UDARA',
                         'LAUT' => 'LAUT',
                     ]),
+                SelectFilter::make('pricing_type')
+                    ->label('Jenis Tarif')
+                    ->options(ExpeditionRateCard::PRICING_LABELS),
                 TernaryFilter::make('is_active')
                     ->label('Status Aktif'),
             ])
