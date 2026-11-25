@@ -9,6 +9,8 @@ use App\Services\StockAllocationService;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Database\Seeders\BrandDosTargetSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\XLSX\Writer;
@@ -155,6 +157,74 @@ class BrandDosTargetTest extends TestCase
             'segment' => BrandDosTarget::SEGMENT_ONLINE,
             'target_dos' => 20,
             'is_active' => true,
+        ]);
+    }
+
+    public function test_admin_can_import_monitoring_dos_excel_in_filament(): void
+    {
+        Storage::fake('local');
+
+        $role = Role::firstOrCreate(['name' => Utils::getSuperAdminName(), 'guard_name' => 'web']);
+        foreach (['ViewAny:BrandDosTarget', 'Create:BrandDosTarget', 'Update:BrandDosTarget'] as $permission) {
+            $role->givePermissionTo(Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'web']));
+        }
+
+        $admin = User::factory()->create();
+        $admin->assignRole($role);
+        $this->actingAs($admin);
+
+        // Format persis seperti tabel Excel Monitoring DOS (termasuk judul di baris 1, PT.MSI tanpa spasi, baris kosong, dan baris TOTAL)
+        $path = $this->workbook([
+            ['MONITORING DOS 23 nov', '', '', ''],
+            ['COMPANY', 'BRAND', 'TARGET DOS BY BRAND', 'ACTUAL DOS Periode OKT'],
+            ['PT.MSI', 'TECNO ONLINE', 20, 30],
+            ['PT.MSI', 'TECNO OFFLINE', 35, 51],
+            ['PT.MSI', 'MOTOROLA', 45, 556],
+            ['PT.MSI', 'infinix', '', 65],
+            ['CV.TOP', 'REALME WJ', 40, 18],
+            ['PT.SMI', 'oraimo online', '', 176],
+            ['', 'TOTAL', 40, 107],
+        ]);
+
+        try {
+            Livewire::test(ManageBrandDosTargets::class)
+                ->callAction('importExcel', data: [
+                    'file' => UploadedFile::fake()->createWithContent('Master_Target_DOS.xlsx', (string) file_get_contents($path)),
+                    'replace_existing' => true,
+                ])
+                ->assertHasNoFormErrors()
+                ->assertNotified('6 data Target DOS berhasil diimport');
+        } finally {
+            @unlink($path);
+        }
+
+        $this->assertSame(6, BrandDosTarget::count());
+        $this->assertDatabaseHas('brand_dos_targets', [
+            'company' => 'PT. MSI',
+            'brand' => 'TECNO',
+            'label' => 'TECNO ONLINE',
+            'segment' => BrandDosTarget::SEGMENT_ONLINE,
+            'target_dos' => 20,
+        ]);
+        $this->assertDatabaseHas('brand_dos_targets', [
+            'company' => 'PT. MSI',
+            'brand' => 'INFINIX',
+            'label' => 'INFINIX',
+            'target_dos' => null,
+        ]);
+        $this->assertDatabaseHas('brand_dos_targets', [
+            'company' => 'CV. TOP',
+            'brand' => 'REALME',
+            'label' => 'REALME WJ',
+            'region_scope' => 'JAWA BARAT',
+            'target_dos' => 40,
+        ]);
+        $this->assertDatabaseHas('brand_dos_targets', [
+            'company' => 'PT. SMI',
+            'brand' => 'ORAIMO',
+            'label' => 'ORAIMO ONLINE',
+            'segment' => BrandDosTarget::SEGMENT_ONLINE,
+            'target_dos' => null,
         ]);
     }
 
