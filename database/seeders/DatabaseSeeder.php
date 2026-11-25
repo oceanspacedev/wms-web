@@ -61,6 +61,7 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             WarehouseMappingSeeder::class,
+            BrandDosTargetSeeder::class,
             ExpeditionSeeder::class,
             ExpeditionRateCardSeeder::class,
             TrackingOrderSeeder::class,

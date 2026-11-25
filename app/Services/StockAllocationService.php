@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Models\BrandDosTarget;
 use App\Models\CsaImport;
+use App\Models\CsaImportItem;
 use App\Models\StockAllocation;
 use App\Models\StockAllocationLine;
 use App\Models\StockAllocationTransfer;
@@ -63,16 +65,17 @@ class StockAllocationService
         private StockReportReader $stockReport,
     ) {}
 
-    public function import(string $path, string $name, ?string $fileName, int $targetDos, int $minTransferQty, ?int $userId): StockAllocation
+    public function import(string $path, string $name, ?string $fileName, int $targetDos, int $minTransferQty, ?int $userId, bool $useBrandTargets = true): StockAllocation
     {
         $report = $this->stockReport->read($path);
         [$rows, $sources] = $report !== null ? $this->fromStockReport($report) : [$this->read($path), []];
 
-        return DB::transaction(function () use ($rows, $sources, $name, $fileName, $targetDos, $minTransferQty, $userId): StockAllocation {
+        return DB::transaction(function () use ($rows, $sources, $name, $fileName, $targetDos, $minTransferQty, $userId, $useBrandTargets): StockAllocation {
             $allocation = StockAllocation::create([
                 'name' => $name,
                 'file_name' => $fileName,
                 'target_dos' => $targetDos,
+                'use_brand_targets' => $useBrandTargets,
                 'min_transfer_qty' => $minTransferQty,
                 'created_by' => $userId,
             ] + $sources);
@@ -143,15 +146,25 @@ class StockAllocationService
         DB::transaction(function () use ($allocation): void {
             $allocation->transfers()->delete();
 
-            $target = $allocation->target_dos;
+            $defaultTarget = $allocation->target_dos;
+            $useBrandTargets = (bool) ($allocation->use_brand_targets ?? true);
+            $brandTargets = $useBrandTargets
+                ? BrandDosTarget::query()->where('is_active', true)->whereNotNull('target_dos')->get()
+                : collect();
             $min = max(1, $allocation->min_transfer_qty);
             $lines = $allocation->lines()->get();
+            $this->fillMissingBrands($allocation, $lines);
 
             foreach ($lines as $line) {
+                $lineTarget = $useBrandTargets
+                    ? BrandDosTarget::resolveFromCollection($brandTargets, $line->brand, $line->warehouse, $line->region, $defaultTarget)
+                    : $defaultTarget;
+
+                $line->target_dos = $lineTarget;
                 $line->avg_daily_sales = round($this->daily($line), 2);
                 $line->dos_before = $this->dos($line, $line->stock);
-                $line->status = $this->status($line->dos_before, $target);
-                $line->need_qty = max(0, (int) ceil(round($this->ideal($line, $target) - $line->stock - $line->incoming, 6)));
+                $line->status = $this->status($line->dos_before, $lineTarget);
+                $line->need_qty = max(0, (int) ceil(round($this->ideal($line, $lineTarget) - $line->stock - $line->incoming, 6)));
             }
 
             $transfers = [];
@@ -160,7 +173,7 @@ class StockAllocationService
             foreach ($lines->groupBy('sku') as $group) {
                 $surplus = [];
                 foreach ($group as $line) {
-                    $qty = $this->surplus($line, $target);
+                    $qty = $this->surplus($line, $line->effectiveTargetDos($defaultTarget));
                     if ($qty >= $min) {
                         $surplus[$line->id] = $qty;
                     }
@@ -244,7 +257,8 @@ class StockAllocationService
             $line->transfer_in = $in[$line->id] ?? 0;
             $line->transfer_out = $out[$line->id] ?? 0;
             $line->dos_after = $this->dos($line, $line->stockAfter());
-            $line->po_qty = max(0, (int) ceil(round($this->ideal($line, $allocation->target_dos) - $line->stockAfter() - $line->incoming, 6)));
+            $lineTarget = $line->effectiveTargetDos($allocation->target_dos);
+            $line->po_qty = max(0, (int) ceil(round($this->ideal($line, $lineTarget) - $line->stockAfter() - $line->incoming, 6)));
 
             if ($line->isDirty()) {
                 $changed[] = $line;
@@ -378,15 +392,22 @@ class StockAllocationService
         $key = $region.'|'.$warehouse.'|'.$sku;
         $qty = (int) round((float) str_replace(',', '.', $value('qty')));
 
+        $brand = BrandDosTarget::normalizeBrand($value('brand')) ?: null;
+
         $items[$key] ??= [
             'region' => $region,
             'warehouse' => $warehouse,
             'sku' => $sku,
+            'brand' => $brand,
             'product_name' => $value('name') ?: (trim($value('brand').' '.$value('type').' '.$value('color')) ?: $sku),
             'stock' => 0,
             'incoming' => 0,
             'sales' => [],
         ];
+
+        if ($items[$key]['brand'] === null && $brand !== null) {
+            $items[$key]['brand'] = $brand;
+        }
 
         $description = strtoupper($value('description'));
 
@@ -425,6 +446,7 @@ class StockAllocationService
                 'region' => $item['region'],
                 'warehouse' => $item['warehouse'],
                 'sku' => $item['sku'],
+                'brand' => $item['brand'] ?? null,
                 'product_name' => mb_substr($item['product_name'], 0, 255),
                 'stock' => $stock,
                 'incoming' => $incoming,
@@ -502,16 +524,23 @@ class StockAllocationService
         $items = [];
         $line = function (string $warehouse, string $sku, string $name, ?string $brand) use (&$items, $regions, $days): string {
             $key = $warehouse.'|'.$sku;
+            $normalizedBrand = BrandDosTarget::normalizeBrand($brand) ?: null;
+
             $items[$key] ??= [
                 'region' => $regions[$warehouse],
                 'warehouse' => $warehouse,
                 'sku' => $sku,
+                'brand' => $normalizedBrand,
                 'product_name' => mb_substr(ItemName::label($name, $brand), 0, 255),
                 'stock' => 0,
                 'incoming' => 0,
                 'sales_qty' => 0,
                 'sales_days' => $days,
             ];
+
+            if ($items[$key]['brand'] === null && $normalizedBrand !== null) {
+                $items[$key]['brand'] = $normalizedBrand;
+            }
 
             return $key;
         };
@@ -566,6 +595,38 @@ class StockAllocationService
         return ($stockDate !== null ? $query()->whereDate('period_end', '<=', $stockDate)->first() : null) ?? $query()->first();
     }
 
+    /**
+     * Lengkapi brand untuk baris alokasi lama (sebelum kolom brand disimpan) saat dihitung ulang.
+     *
+     * @param  Collection<int, StockAllocationLine>  $lines
+     */
+    private function fillMissingBrands(StockAllocation $allocation, Collection $lines): void
+    {
+        $missing = $lines->filter(fn (StockAllocationLine $line): bool => blank($line->brand));
+
+        if ($missing->isEmpty()) {
+            return;
+        }
+
+        $salesBrands = $allocation->sales_import_id !== null
+            ? CsaImportItem::query()
+                ->where('csa_import_id', $allocation->sales_import_id)
+                ->whereNotNull('brand')
+                ->where('brand', '!=', '')
+                ->pluck('brand', 'kode_barang')
+            : collect();
+
+        foreach ($missing as $line) {
+            $fromSales = $salesBrands->get($line->sku);
+            $fromName = explode(' ', trim((string) $line->product_name))[0] ?? '';
+            $brand = BrandDosTarget::normalizeBrand($fromSales ?: $fromName);
+
+            if ($brand !== '') {
+                $line->brand = $brand;
+            }
+        }
+    }
+
     private function status(?float $dos, int $target): string
     {
         return match (true) {
@@ -582,8 +643,8 @@ class StockAllocationService
      */
     private function saveLines(array $lines): void
     {
-        $columns = ['id', 'stock_allocation_id', 'region', 'warehouse', 'sku', 'product_name', 'stock', 'incoming',
-            'sales_qty', 'sales_days', 'avg_daily_sales', 'dos_before', 'dos_after', 'status', 'need_qty',
+        $columns = ['id', 'stock_allocation_id', 'region', 'warehouse', 'sku', 'brand', 'product_name', 'stock', 'incoming',
+            'sales_qty', 'sales_days', 'target_dos', 'avg_daily_sales', 'dos_before', 'dos_after', 'status', 'need_qty',
             'transfer_in', 'transfer_out', 'po_qty'];
         $now = now();
 

@@ -43,11 +43,13 @@ class StockAllocationLine extends Model
         'region',
         'warehouse',
         'sku',
+        'brand',
         'product_name',
         'stock',
         'incoming',
         'sales_qty',
         'sales_days',
+        'target_dos',
         'avg_daily_sales',
         'dos_before',
         'dos_after',
@@ -68,6 +70,7 @@ class StockAllocationLine extends Model
             'incoming' => 'integer',
             'sales_qty' => 'integer',
             'sales_days' => 'integer',
+            'target_dos' => 'integer',
             'avg_daily_sales' => 'float',
             'dos_before' => 'float',
             'dos_after' => 'float',
@@ -105,6 +108,11 @@ class StockAllocationLine extends Model
     public function stockAfter(): int
     {
         return $this->stock + $this->transfer_in - $this->transfer_out;
+    }
+
+    public function effectiveTargetDos(?int $fallback = null): int
+    {
+        return (int) ($this->target_dos ?? $fallback ?? $this->allocation?->target_dos ?? 30);
     }
 
     public function statusLabel(): string
