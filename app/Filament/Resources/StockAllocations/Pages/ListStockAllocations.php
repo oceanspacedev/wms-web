@@ -9,6 +9,7 @@ use Exception;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Grid;
@@ -42,15 +43,19 @@ class ListStockAllocations extends ListRecords
                         ->maxSize(51200)
                         ->storeFileNamesIn('file_name')
                         ->required(),
+                    Toggle::make('use_brand_targets')
+                        ->label('Gunakan Master Target DOS per Brand')
+                        ->helperText('Jika aktif, setiap brand memakai target dari menu Master Target DOS. Angka di bawah dipakai sebagai default untuk brand yang belum diatur.')
+                        ->default(true),
                     Grid::make(2)->schema([
                         TextInput::make('target_dos')
-                            ->label('Target DOS')
+                            ->label('Target DOS Default')
                             ->numeric()
                             ->integer()
-                            ->minValue(14)
-                            ->maxValue(120)
+                            ->minValue(7)
+                            ->maxValue(180)
                             ->suffix('hari')
-                            ->default(30)
+                            ->default(40)
                             ->required(),
                         TextInput::make('min_transfer_qty')
                             ->label('Transfer minimal')
@@ -75,6 +80,7 @@ class ListStockAllocations extends ListRecords
                             (int) $data['target_dos'],
                             (int) $data['min_transfer_qty'],
                             auth()->id(),
+                            (bool) ($data['use_brand_targets'] ?? true),
                         );
                     } catch (Exception $exception) {
                         Notification::make()

@@ -288,34 +288,34 @@
                             <thead class="bg-gray-50/50 dark:bg-white/5">
                                 <tr>
                                     <th scope="col" class="px-4 py-3.5 ps-4 sm:ps-6 text-start text-sm font-semibold text-gray-950 dark:text-white">
-                                        Expedition
+                                        Ekspedisi
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-start text-sm font-semibold text-gray-950 dark:text-white">
-                                        Service type
+                                        Layanan
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-end text-sm font-semibold text-gray-950 dark:text-white">
-                                        Rate per kg
+                                        Tarif
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">
-                                        Min kg
+                                        Min KG
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">
-                                        Insurance rate percent
+                                        Premi Asuransi
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-end text-sm font-semibold text-gray-950 dark:text-white">
-                                        Biaya asuransi
+                                        Biaya Asuransi
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-end text-sm font-semibold text-gray-950 dark:text-white">
-                                        Biaya ongkir
+                                        Biaya Ongkir
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-end text-sm font-semibold text-gray-950 dark:text-white">
-                                        Total biaya
+                                        Total Biaya
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">
-                                        % Dari amount
+                                        % dari Nilai
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 pe-4 sm:pe-6 text-center text-sm font-semibold text-gray-950 dark:text-white">
-                                        Sla days
+                                        Estimasi SLA
                                     </th>
                                 </tr>
                             </thead>
@@ -325,26 +325,36 @@
                                         x-show="!search || '{{ strtolower($rate['expedition'] . ' ' . $rate['service']) }}'.includes(search.toLowerCase())"
                                         class="transition duration-75 hover:bg-gray-50/50 dark:hover:bg-white/5"
                                     >
-                                        {{-- Expedition --}}
+                                        {{-- Ekspedisi --}}
                                         <td class="px-4 py-4 ps-4 sm:ps-6 text-sm text-gray-950 dark:text-white align-middle whitespace-nowrap">
                                             <div class="flex items-center gap-1.5">
                                                 <span class="font-medium text-gray-950 dark:text-white">{{ $rate['expedition'] }}</span>
                                                 @if($index === 0)
-                                                    <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                                                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                                                         Termurah
+                                                    </span>
+                                                @endif
+                                                @if(!empty($rate['is_flat']))
+                                                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-400/20">
+                                                        {{ $rate['pricing_badge'] ?? 'Flat' }}
                                                     </span>
                                                 @endif
                                             </div>
                                         </td>
 
-                                        {{-- Service type --}}
+                                        {{-- Layanan --}}
                                         <td class="px-4 py-4 text-sm text-gray-950 dark:text-white align-middle whitespace-nowrap">
                                             {{ $rate['service'] }}
                                         </td>
 
-                                        {{-- Rate per kg --}}
-                                        <td class="px-4 py-4 text-sm text-gray-950 dark:text-white align-middle text-end whitespace-nowrap">
+                                        {{-- Tarif --}}
+                                        <td class="px-4 py-4 text-sm tabular-nums text-gray-950 dark:text-white align-middle text-end whitespace-nowrap">
                                             {{ isset($rate['rate_per_kg']) ? number_format($rate['rate_per_kg'], 0, ',', '.') : '-' }}
+                                            @if(!empty($rate['is_flat']))
+                                                <span class="text-xs text-gray-400 dark:text-gray-500">{{ $rate['pricing_badge'] ?? 'Flat' }}</span>
+                                            @else
+                                                <span class="text-xs text-gray-400 dark:text-gray-500">/kg</span>
+                                            @endif
                                         </td>
 
                                         {{-- Min kg --}}

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Posisi stok satu SKU di satu gudang: stok, incoming, penjualan, DOS sebelum/sesudah transfer, dan sisa PO.
@@ -42,11 +43,13 @@ class StockAllocationLine extends Model
         'region',
         'warehouse',
         'sku',
+        'brand',
         'product_name',
         'stock',
         'incoming',
         'sales_qty',
         'sales_days',
+        'target_dos',
         'avg_daily_sales',
         'dos_before',
         'dos_after',
@@ -67,6 +70,7 @@ class StockAllocationLine extends Model
             'incoming' => 'integer',
             'sales_qty' => 'integer',
             'sales_days' => 'integer',
+            'target_dos' => 'integer',
             'avg_daily_sales' => 'float',
             'dos_before' => 'float',
             'dos_after' => 'float',
@@ -85,9 +89,30 @@ class StockAllocationLine extends Model
         return $this->belongsTo(StockAllocation::class, 'stock_allocation_id');
     }
 
+    /**
+     * @return HasMany<StockAllocationTransfer, $this>
+     */
+    public function transfersIn(): HasMany
+    {
+        return $this->hasMany(StockAllocationTransfer::class, 'to_line_id');
+    }
+
+    /**
+     * @return HasMany<StockAllocationTransfer, $this>
+     */
+    public function transfersOut(): HasMany
+    {
+        return $this->hasMany(StockAllocationTransfer::class, 'from_line_id');
+    }
+
     public function stockAfter(): int
     {
         return $this->stock + $this->transfer_in - $this->transfer_out;
+    }
+
+    public function effectiveTargetDos(?int $fallback = null): int
+    {
+        return (int) ($this->target_dos ?? $fallback ?? $this->allocation?->target_dos ?? 30);
     }
 
     public function statusLabel(): string

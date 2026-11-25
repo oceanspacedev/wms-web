@@ -7,6 +7,7 @@ use App\Models\StockMutation;
 use App\Models\StockMutationItem;
 use App\Services\StockMutationExporter;
 use App\Services\StockMutationService;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Hidden;
@@ -17,6 +18,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Enums\Alignment;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -34,6 +36,8 @@ class MutationsRelationManager extends RelationManager
     protected static string $relationship = 'mutations';
 
     protected static ?string $title = 'Dokumen Mutasi';
+
+    protected static string|BackedEnum|null $icon = Heroicon::OutlinedDocumentText;
 
     public function isReadOnly(): bool
     {

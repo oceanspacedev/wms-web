@@ -12,6 +12,7 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Grid;
@@ -57,6 +58,9 @@ class ViewStockAllocation extends ViewRecord
     {
         $record = $this->record;
 
+        $hasCustomBrandTargets = (bool) ($record->use_brand_targets ?? false)
+            && $record->lines()->whereNotNull('target_dos')->where('target_dos', '!=', $record->target_dos)->exists();
+
         return implode(' · ', array_filter([
             // Dari laporan stok ERP: tanggal posisi stok & periode penjualan yang dipakai sebagai angka laku
             $record->usesStockReport() ? 'stok '.$record->stock_date->format('d/m/Y') : $record->created_at?->format('d/m/Y H:i'),
@@ -65,7 +69,9 @@ class ViewStockAllocation extends ViewRecord
                 : null,
             $record->warehouse_count.' gudang',
             $record->sku_count.' SKU',
-            'target stok cukup '.$record->target_dos.' hari',
+            $hasCustomBrandTargets
+                ? 'target DOS per brand'
+                : 'target stok cukup '.$record->target_dos.' hari',
         ]));
     }
 
@@ -84,14 +90,29 @@ class ViewStockAllocation extends ViewRecord
     {
         return [
             ActionGroup::make([
-                Action::make('howItWorks')
-                    ->label('Cara Hitung')
-                    ->icon('heroicon-o-information-circle')
-                    ->modalHeading('Cara Hitung Alokasi Stok')
-                    ->modalContent(fn (): HtmlString => $this->explanation())
-                    ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Tutup')
-                    ->modalWidth(Width::Large),
+                // Setujui seluruh saran transfer yang masih pending sekaligus
+                Action::make('approveAll')
+                    ->label('Setujui Semua Saran')
+                    ->icon('heroicon-o-check-badge')
+                    ->color('success')
+                    ->visible(fn (): bool => (auth()->user()?->can('update', $this->record) ?? false)
+                        && $this->record->transfers()->where('status', StockAllocationTransfer::STATUS_PENDING)->exists())
+                    ->requiresConfirmation()
+                    ->modalHeading('Setujui Semua Saran Transfer')
+                    ->modalDescription(fn (): string => 'Apakah Anda yakin ingin menyetujui seluruh '.$this->record->transfers()->where('status', StockAllocationTransfer::STATUS_PENDING)->count().' saran transfer yang belum diputuskan?')
+                    ->modalSubmitActionLabel('Ya, Setujui Semua')
+                    ->action(function (): void {
+                        $pending = $this->record->transfers()->where('status', StockAllocationTransfer::STATUS_PENDING)->get();
+                        app(StockAllocationService::class)->decide($this->record, $pending, StockAllocationTransfer::STATUS_APPROVED, auth()->id());
+
+                        Notification::make()
+                            ->title($pending->count().' saran transfer berhasil disetujui')
+                            ->success()
+                            ->send();
+
+                        $this->record->refresh();
+                        $this->dispatch('stock-allocation-updated');
+                    }),
 
                 // Saran yang disetujui → dokumen mutasi per rute (tab Dokumen Mutasi)
                 Action::make('createMutations')
@@ -115,6 +136,15 @@ class ViewStockAllocation extends ViewRecord
                         $this->redirect(StockAllocationResource::getUrl('view', ['record' => $this->record, 'activeRelationManager' => 2]));
                     }),
 
+                Action::make('howItWorks')
+                    ->label('Cara Hitung')
+                    ->icon('heroicon-o-information-circle')
+                    ->modalHeading('Cara Hitung Alokasi Stok')
+                    ->modalContent(fn (): HtmlString => $this->explanation())
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Tutup')
+                    ->modalWidth(Width::Large),
+
                 ExportAllocationAction::make(),
 
                 // Sudah ada dokumen mutasi: saran tidak dihitung ulang supaya dokumennya tetap cocok
@@ -127,17 +157,21 @@ class ViewStockAllocation extends ViewRecord
                     ->modalWidth(Width::Medium)
                     ->modalSubmitActionLabel('Hitung Ulang')
                     ->fillForm(fn (): array => [
+                        'use_brand_targets' => (bool) ($this->record->use_brand_targets ?? true),
                         'target_dos' => $this->record->target_dos,
                         'min_transfer_qty' => $this->record->min_transfer_qty,
                     ])
                     ->schema([
+                        Toggle::make('use_brand_targets')
+                            ->label('Gunakan Master Target DOS per Brand')
+                            ->helperText('Jika aktif, setiap brand memakai target dari Master Target DOS. Angka di bawah jadi default.'),
                         Grid::make(2)->schema([
                             TextInput::make('target_dos')
-                                ->label('Target DOS')
+                                ->label('Target DOS Default')
                                 ->numeric()
                                 ->integer()
-                                ->minValue(14)
-                                ->maxValue(120)
+                                ->minValue(7)
+                                ->maxValue(180)
                                 ->suffix('hari')
                                 ->required(),
                             TextInput::make('min_transfer_qty')
@@ -151,6 +185,7 @@ class ViewStockAllocation extends ViewRecord
                     ])
                     ->action(function (array $data): void {
                         $this->record->update([
+                            'use_brand_targets' => (bool) ($data['use_brand_targets'] ?? true),
                             'target_dos' => (int) $data['target_dos'],
                             'min_transfer_qty' => (int) $data['min_transfer_qty'],
                         ]);
@@ -191,12 +226,17 @@ class ViewStockAllocation extends ViewRecord
                 .'. Barang di gudang transit (#HPM…) dihitung sebagai incoming depo tujuannya. Hanya HP &amp; tablet di gudang yang punya region di Pemetaan Gudang.'
             : 'Stok, laku 30 hari, dan incoming dari file DOS yang di-upload.';
 
+        $targetNote = ($record->use_brand_targets ?? false)
+            ? 'target DOS masing-masing brand di <b>Master Target DOS</b> (default '.$target.' hari jika brand belum diatur)'
+            : $target.' hari';
+
         $points = [
             '<b>Data.</b> '.$sources,
             '<b>Laku per hari</b> = jumlah terjual ÷ jumlah hari periode penjualan.',
-            '<b>DOS</b> = stok ÷ laku per hari, artinya stok cukup untuk berapa hari. ≤ 7 hari KRITIS, ≤ 14 WASPADA, ≤ '.$target.' AMAN, lebih dari itu OVERSTOCK.',
-            '<b>Kebutuhan</b> gudang = '.$target.' hari × laku per hari − stok − incoming.',
-            '<b>Bisa dikirim</b> = stok fisik − '.$target.' hari × laku per hari. Incoming tidak dihitung supaya gudang pengirim tidak kosong kalau barang di jalan terlambat. Barang yang tidak laku di suatu gudang bisa dikirim semuanya.',
+            '<b>Target DOS.</b> Menggunakan '.$targetNote.'.',
+            '<b>DOS</b> = stok ÷ laku per hari, artinya stok cukup untuk berapa hari. ≤ 7 hari KRITIS, ≤ 14 WASPADA, ≤ target DOS AMAN, lebih dari itu OVERSTOCK.',
+            '<b>Kebutuhan</b> gudang = target DOS × laku per hari − stok − incoming.',
+            '<b>Bisa dikirim</b> = stok fisik − target DOS × laku per hari. Incoming tidak dihitung supaya gudang pengirim tidak kosong kalau barang di jalan terlambat. Barang yang tidak laku di suatu gudang bisa dikirim semuanya.',
             '<b>Urutan.</b> Gudang paling kritis dilayani lebih dulu, diambil dari gudang paling berlebih di region yang sama, lalu dari gudang PUSAT. PUSAT terhubung ke semua region: bisa mengirim ke depo mana pun dan menerima dari depo mana pun kalau stoknya sendiri kurang.',
             '<b>Minimal</b> '.$record->min_transfer_qty.' unit per saran. Kekurangan yang tidak tertutup transfer menjadi <b>Sisa PO</b>.',
         ];

@@ -45,7 +45,59 @@ class ExplainTotalsAction
             ->modalContent(fn (FreightInvoice $record): View => view('filament.freight-invoices.explain-totals', [
                 'invoice' => $record,
                 'rows' => self::breakdown($record),
+                'shipmentSummary' => self::shipmentSummary($record),
+                'companyBreakdown' => self::companyBreakdown($record),
             ]));
+    }
+
+    /**
+     * Ringkasan kecocokan resi dengan Data Pengiriman (csa_shipments).
+     *
+     * @return array{matched: int, weight_mismatch: int, expedition_mismatch: int, unmatched: int}
+     */
+    public static function shipmentSummary(FreightInvoice $invoice): array
+    {
+        $counts = $invoice->items()
+            ->selectRaw('shipment_match_status, count(*) as total')
+            ->groupBy('shipment_match_status')
+            ->pluck('total', 'shipment_match_status');
+
+        return [
+            'matched' => (int) ($counts['matched'] ?? 0),
+            'weight_mismatch' => (int) ($counts['weight_mismatch'] ?? 0),
+            'expedition_mismatch' => (int) ($counts['expedition_mismatch'] ?? 0),
+            'unmatched' => (int) ($counts['unmatched'] ?? 0),
+        ];
+    }
+
+    /**
+     * Rekap beban tagihan per Badan Usaha & Reffnote (hasil pencocokan ke Data Pengiriman).
+     *
+     * @return list<array{badanUsaha: string, reffNote: string, count: int, nominalSj: float, billed: float, approved: float, ratio: ?float}>
+     */
+    public static function companyBreakdown(FreightInvoice $invoice): array
+    {
+        return $invoice->items()->get()
+            ->groupBy(fn (FreightInvoiceItem $item): string => ($item->shipment_badan_usaha ?: '(Belum terpetakan)').'||'.($item->shipment_reff_note ?: '-'))
+            ->map(function ($items, string $key): array {
+                [$bu, $reff] = explode('||', $key);
+                $nominal = (float) $items->sum(fn (FreightInvoiceItem $i): float => (float) $i->shipment_nominal_sj);
+                $billed = (float) $items->sum(fn (FreightInvoiceItem $i): float => (float) $i->billed_total);
+                $approved = (float) $items->sum(fn (FreightInvoiceItem $i): float => $i->approvedAmount());
+
+                return [
+                    'badanUsaha' => $bu,
+                    'reffNote' => $reff,
+                    'count' => $items->count(),
+                    'nominalSj' => $nominal,
+                    'billed' => $billed,
+                    'approved' => $approved,
+                    'ratio' => $nominal > 0 ? round(($billed / $nominal) * 100, 2) : null,
+                ];
+            })
+            ->sortByDesc('billed')
+            ->values()
+            ->all();
     }
 
     /**

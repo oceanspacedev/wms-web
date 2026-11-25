@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\WarehouseMapping;
 use App\Services\StockAllocationService;
 use BezhanSalleh\FilamentShield\Support\Utils;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use OpenSpout\Common\Entity\Row;
@@ -123,8 +124,12 @@ class StockReportAllocationTest extends TestCase
 
         $component = Livewire::test(TransfersRelationManager::class, ['ownerRecord' => $allocation, 'pageClass' => ViewStockAllocation::class]);
 
+        $component
+            ->mountAction(TestAction::make('explain')->table($transfer))
+            ->assertMountedActionModalSee(['Penjualan CSA (30 hari)', '300 unit', '10 / hari', 'Stok per 27/10/2026']);
+
         $this->assertSame(
-            'GMBDG stok 10, laku 10/hari, cukup 1 hari → kurang 290 unit untuk 30 hari. GMCRB stok 100, laku 1/hari, cukup 100 hari → lebih 70 unit.',
+            'GMBDG: stok 10 ÷ laku 10/hari = cukup 1 hari. Target buffer 30 hari butuh 300 unit → kurang 290 unit. GMCRB: stok 100 ÷ laku 1/hari = cukup 100 hari. Target buffer 30 hari butuh 30 unit → lebih 70 unit aman dikirim.',
             $component->instance()->reason($transfer),
         );
     }

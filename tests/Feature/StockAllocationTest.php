@@ -224,9 +224,30 @@ class StockAllocationTest extends TestCase
     {
         $allocation = $this->allocate();
         $this->actingAsAdmin(['ViewAny:StockAllocation', 'View:StockAllocation']);
+        $transfer = $this->transfer($allocation, 'GTC', 'GTBDG');
 
         Livewire::test(TransfersRelationManager::class, ['ownerRecord' => $allocation, 'pageClass' => ViewStockAllocation::class])
-            ->assertActionHidden(TestAction::make('approve')->table($this->transfer($allocation, 'GTC', 'GTBDG')));
+            ->assertActionHidden(TestAction::make('approve')->table($transfer))
+            ->mountAction(TestAction::make('explain')->table($transfer))
+            ->assertMountedActionModalSee([
+                'Pengirim',
+                'Penerima',
+                'GTC',
+                'GTBDG',
+                'Kirim 270 unit',
+                'Target buffer 30 hari',
+                'Total terjual (30 hari)',
+                '300 unit',
+                '10 / hari',
+                'Dikirim ke',
+                '2 gudang · 280 unit',
+                '→ GTBDG',
+                '→ GTKRW',
+                'Diterima dari',
+                '2 gudang · 290 unit',
+                '← GTC',
+                '← GTTSK',
+            ]);
     }
 
     public function test_recalculate_uses_the_new_parameters(): void
@@ -406,6 +427,20 @@ class StockAllocationTest extends TestCase
             ->assertNotified('Tidak bisa disimpan');
 
         $this->assertSame(StockAllocationTransfer::STATUS_REJECTED, $toBandung->refresh()->status);
+    }
+
+    public function test_view_stock_allocation_can_approve_all_pending_transfers(): void
+    {
+        $allocation = $this->allocate();
+        $this->actingAsAdmin(['ViewAny:StockAllocation', 'View:StockAllocation', 'Update:StockAllocation']);
+
+        $this->assertSame(3, $allocation->transfers()->where('status', StockAllocationTransfer::STATUS_PENDING)->count());
+
+        Livewire::test(ViewStockAllocation::class, ['record' => $allocation->getRouteKey()])
+            ->callAction('approveAll')
+            ->assertNotified('3 saran transfer berhasil disetujui');
+
+        $this->assertSame(3, $allocation->transfers()->where('status', StockAllocationTransfer::STATUS_APPROVED)->count());
     }
 
     public function test_allocation_with_mutation_documents_cannot_be_deleted(): void

@@ -1,0 +1,217 @@
+<svg viewBox="0 0 1300 920" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+    <defs>
+        <linearGradient id="bgHead" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#1e293b"/>
+            <stop offset="100%" stop-color="#0f172a"/>
+        </linearGradient>
+        <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+            <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.08"/>
+        </filter>
+        <marker id="arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#3b82f6"/>
+        </marker>
+        <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#8b5cf6"/>
+        </marker>
+        <marker id="arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#d97706"/>
+        </marker>
+        <marker id="arrow-emerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981"/>
+        </marker>
+        <marker id="arrow-rose" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#f43f5e"/>
+        </marker>
+    </defs>
+
+    <!-- Background Canvas -->
+    <rect width="1300" height="920" fill="#f8fafc" rx="12"/>
+
+    <!-- Header Banner -->
+    <rect x="30" y="25" width="1240" height="75" rx="10" fill="url(#bgHead)"/>
+    <text x="55" y="60" fill="#ffffff" font-size="22" font-weight="bold">ALUR INTEGRASI LOGISTIK &amp; DISTRIBUSI WMS (END-TO-END)</text>
+    <text x="55" y="82" fill="#94a3b8" font-size="13">Siklus Tertutup: Dari Perencanaan Stok, Alokasi Antar Depo, Pengiriman Ekspedisi, hingga Audit Rekonsiliasi Tagihan</text>
+    <rect x="1110" y="45" width="135" height="32" rx="6" fill="#3b82f6" fill-opacity="0.2"/>
+    <text x="1177" y="66" fill="#60a5fa" font-size="12" font-weight="bold" text-anchor="middle">WMS ECOSYSTEM</text>
+
+    <!-- SECTION 1: INPUT DATA STOK & PENJUALAN -->
+    <g transform="translate(40, 130)">
+        <rect width="260" height="230" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+        <path d="M 0 12 Q 0 0 12 0 L 248 0 Q 260 0 260 12 L 260 42 L 0 42 Z" fill="#eff6ff"/>
+        <text x="15" y="27" fill="#1d4ed8" font-size="13" font-weight="bold">1. INPUT DATA STOK &amp; LAKU</text>
+        
+        <rect x="15" y="55" width="230" height="42" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="25" y="73" fill="#0f172a" font-size="12" font-weight="bold">📊 Stok ERP [XRSTOK02]</text>
+        <text x="25" y="88" fill="#64748b" font-size="10">Posisi fisik depo &amp; transit (#HPM)</text>
+
+        <rect x="15" y="105" width="230" height="42" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="25" y="123" fill="#0f172a" font-size="12" font-weight="bold">📈 Laporan Penjualan CSA</text>
+        <text x="25" y="138" fill="#64748b" font-size="10">Laju penjualan 30 hari terakhir</text>
+
+        <rect x="15" y="155" width="230" height="42" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="25" y="173" fill="#0f172a" font-size="12" font-weight="bold">🗺️ Pemetaan Gudang</text>
+        <text x="25" y="188" fill="#64748b" font-size="10">Region depo (Pusat, Jabar, Jateng, dll)</text>
+    </g>
+
+    <!-- Arrow 1 -> 2 -->
+    <path d="M 300 245 L 350 245" fill="none" stroke="#3b82f6" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <text x="325" y="235" fill="#3b82f6" font-size="10" font-weight="bold" text-anchor="middle">Input Data</text>
+
+    <!-- SECTION 2: ALOKASI STOK ENGINE -->
+    <g transform="translate(360, 130)">
+        <rect width="280" height="230" rx="12" fill="#ffffff" stroke="#c084fc" stroke-width="2" filter="url(#shadow)"/>
+        <path d="M 0 12 Q 0 0 12 0 L 268 0 Q 280 0 280 12 L 280 42 L 0 42 Z" fill="#faf5ff"/>
+        <text x="15" y="27" fill="#7e22ce" font-size="13" font-weight="bold">2. ALOKASI STOK (DOS ENGINE)</text>
+
+        <!-- DOS Rules Box -->
+        <rect x="15" y="55" width="250" height="60" rx="6" fill="#fdf4ff" stroke="#f3e8ff"/>
+        <text x="25" y="73" fill="#9333ea" font-size="11" font-weight="bold">Kalkulasi Days of Stock (DOS):</text>
+        <text x="25" y="90" fill="#4b5563" font-size="10">• ≤ 7 Hari: Kritis | ≤ 14 Hari: Waspada</text>
+        <text x="25" y="104" fill="#4b5563" font-size="10">• ≤ 30 Hari: Aman | &gt; 30 Hari: Overstock</text>
+
+        <!-- Allocation Strategy -->
+        <rect x="15" y="125" width="250" height="85" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="25" y="143" fill="#0f172a" font-size="11" font-weight="bold">Aturan Penyeimbangan:</text>
+        <text x="25" y="160" fill="#64748b" font-size="10">1. Kritis diprioritaskan dilayani</text>
+        <text x="25" y="176" fill="#64748b" font-size="10">2. Diambil dari gudang surplus 1 region</text>
+        <text x="25" y="192" fill="#64748b" font-size="10">3. Hub PUSAT (GMJKT) suplai lintas region</text>
+    </g>
+
+    <!-- Arrows from Section 2 to 3A and 3B -->
+    <!-- Path to Dokumen Mutasi (Down Right) -->
+    <path d="M 640 210 L 730 210" fill="none" stroke="#d97706" stroke-width="3" marker-end="url(#arrow-amber)"/>
+    <text x="685" y="200" fill="#b45309" font-size="10" font-weight="bold" text-anchor="middle">Disetujui</text>
+
+    <!-- Path to Sisa PO (Up Right) -->
+    <path d="M 640 270 L 685 270 L 685 365 L 730 365" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-dasharray="5,4" marker-end="url(#arrow-purple)"/>
+    <text x="685" y="325" fill="#7c3aed" font-size="10" font-weight="bold" text-anchor="middle">Sisa PO</text>
+
+    <!-- SECTION 3A: DOKUMEN MUTASI -->
+    <g transform="translate(740, 130)">
+        <rect width="260" height="150" rx="12" fill="#ffffff" stroke="#fde68a" stroke-width="2" filter="url(#shadow)"/>
+        <path d="M 0 12 Q 0 0 12 0 L 248 0 Q 260 0 260 12 L 260 42 L 0 42 Z" fill="#fffbeb"/>
+        <text x="15" y="27" fill="#b45309" font-size="13" font-weight="bold">3A. DOKUMEN MUTASI (TO)</text>
+
+        <rect x="15" y="52" width="230" height="85" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="25" y="70" fill="#0f172a" font-size="11" font-weight="bold">Nomor Dokumen: MUT-yymm-xxx</text>
+        <text x="25" y="87" fill="#64748b" font-size="10">• Dikelompokkan per rute (Depo A → B)</text>
+        <text x="25" y="103" fill="#64748b" font-size="10">• Cek Tarif: pilih ekspedisi termurah</text>
+        <text x="25" y="120" fill="#64748b" font-size="10">• Status: Disiapkan → Dikirim → Diterima</text>
+    </g>
+
+    <!-- SECTION 3B: PURCHASE ORDER (SUPPLIER) -->
+    <g transform="translate(740, 310)">
+        <rect width="260" height="130" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+        <path d="M 0 12 Q 0 0 12 0 L 248 0 Q 260 0 260 12 L 260 42 L 0 42 Z" fill="#f1f5f9"/>
+        <text x="15" y="27" fill="#334155" font-size="13" font-weight="bold">3B. PURCHASE ORDER (PO)</text>
+
+        <rect x="15" y="52" width="230" height="70" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="25" y="70" fill="#0f172a" font-size="11" font-weight="bold">Kekurangan Stok Nasional</text>
+        <text x="25" y="87" fill="#64748b" font-size="10">• Otomatis rekap kebutuhan per SKU</text>
+        <text x="25" y="103" fill="#64748b" font-size="10">• Diteruskan order ke principal/vendor</text>
+    </g>
+
+    <!-- SECTION SALES ORDERS (SURAT JALAN) -->
+    <g transform="translate(1040, 130)">
+        <rect width="220" height="150" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+        <path d="M 0 12 Q 0 0 12 0 L 208 0 Q 220 0 220 12 L 220 42 L 0 42 Z" fill="#f1f5f9"/>
+        <text x="15" y="27" fill="#334155" font-size="13" font-weight="bold">PENJUALAN (SALES)</text>
+
+        <rect x="15" y="52" width="190" height="85" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="25" y="70" fill="#0f172a" font-size="11" font-weight="bold">Surat Jalan (SJ)</text>
+        <text x="25" y="87" fill="#64748b" font-size="10">• Kirim ke toko/dealer</text>
+        <text x="25" y="103" fill="#64748b" font-size="10">• Menggunakan ekspedisi</text>
+        <text x="25" y="120" fill="#64748b" font-size="10">• Nilai SJ + PPN 11%</text>
+    </g>
+
+    <!-- Arrow from Mutasi & Sales into Data Pengiriman -->
+    <path d="M 870 280 L 870 490 L 730 490" fill="none" stroke="#d97706" stroke-width="3" marker-end="url(#arrow-amber)"/>
+    <text x="890" y="380" fill="#b45309" font-size="10" font-weight="bold">Kirim Transfer (TO)</text>
+
+    <path d="M 1150 280 L 1150 530 L 730 530" fill="none" stroke="#3b82f6" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <text x="1160" y="380" fill="#2563eb" font-size="10" font-weight="bold">Kirim Jual (SJ)</text>
+
+    <!-- SECTION 4: DATA PENGIRIMAN (CENTRAL HUB LOGISTIK) -->
+    <g transform="translate(40, 470)">
+        <rect width="680" height="190" rx="12" fill="#ffffff" stroke="#6ee7b7" stroke-width="2.5" filter="url(#shadow)"/>
+        <path d="M 0 12 Q 0 0 12 0 L 668 0 Q 680 0 680 42 L 0 42 Z" fill="#ecfdf5"/>
+        <text x="20" y="27" fill="#047857" font-size="14" font-weight="bold">4. DATA PENGIRIMAN (HUB OPERASIONAL LOGISTIK)</text>
+        <text x="470" y="27" fill="#059669" font-size="11" font-weight="bold">DATABASE SEMUA PENGIRIMAN</text>
+
+        <!-- Left Column: Attributes -->
+        <rect x="20" y="55" width="310" height="120" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="35" y="75" fill="#0f172a" font-size="12" font-weight="bold">Data Dicatat Lengkap:</text>
+        <text x="35" y="95" fill="#475569" font-size="11">✓ No Resi / AWB Ekspedisi (J&amp;T, 21 Express, dll)</text>
+        <text x="35" y="113" fill="#475569" font-size="11">✓ No Surat Jalan (SJ) / No Mutasi (TO)</text>
+        <text x="35" y="131" fill="#475569" font-size="11">✓ Asal Depo, Tujuan (Kota/Kecamatan), Ekspedisi</text>
+        <text x="35" y="149" fill="#475569" font-size="11">✓ Berat Aktual Gudang, Koli, Nominal Faktur/SJ</text>
+
+        <!-- Right Column: Status & POD -->
+        <rect x="350" y="55" width="310" height="120" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="365" y="75" fill="#0f172a" font-size="12" font-weight="bold">Tracking &amp; Proof of Delivery (POD):</text>
+        <text x="365" y="95" fill="#475569" font-size="11">• Status Pengiriman (On Delivery / Delivered)</text>
+        <text x="365" y="113" fill="#475569" font-size="11">• Bukti Terima / POD diunggah ke Dokumen Gudang</text>
+        <text x="365" y="131" fill="#475569" font-size="11">• Validasi Barang Diterima Lengkap / Ada Selisih</text>
+        <text x="365" y="152" fill="#059669" font-size="11" font-weight="bold">→ Kunci Validasi Audit Tagihan Ekspedisi</text>
+    </g>
+
+    <!-- SECTION RATE CARDS (TARIF KONTRAK) -->
+    <g transform="translate(760, 470)">
+        <rect width="500" height="190" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+        <path d="M 0 12 Q 0 0 12 0 L 488 0 Q 500 0 500 42 L 0 42 Z" fill="#f8fafc"/>
+        <text x="20" y="27" fill="#334155" font-size="13" font-weight="bold">MASTER TARIF KONTRAK (RATE CARD)</text>
+
+        <rect x="20" y="55" width="460" height="120" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="35" y="75" fill="#0f172a" font-size="12" font-weight="bold">Perjanjian Kerjasama (PK) Ekspedisi:</text>
+        <text x="35" y="95" fill="#475569" font-size="11">• Tarif Pokok per KG per Rute (contoh: J&amp;T Cirebon → Jabar Rp 3.000, Jateng Rp 5.000)</text>
+        <text x="35" y="113" fill="#475569" font-size="11">• Minimal KG (Min. 1 KG / Min. 10 KG / Min. 25 KG)</text>
+        <text x="35" y="131" fill="#475569" font-size="11">• Tarif Asuransi (0,2% dari DPP / Exclude PPN 11%)</text>
+        <text x="35" y="149" fill="#475569" font-size="11">• SLA Pengiriman (1-2 hari, reguler, darat, udara)</text>
+    </g>
+
+    <!-- Arrows to Section 5: Rekonsiliasi -->
+    <path d="M 380 660 L 380 710 L 520 710" fill="none" stroke="#10b981" stroke-width="3" marker-end="url(#arrow-emerald)"/>
+    <text x="380" y="695" fill="#047857" font-size="10" font-weight="bold" text-anchor="middle">Tahap 2: Resi &amp; Fisik Riil</text>
+
+    <path d="M 1010 660 L 1010 710 L 880 710" fill="none" stroke="#f43f5e" stroke-width="3" marker-end="url(#arrow-rose)"/>
+    <text x="1010" y="695" fill="#e11d48" font-size="10" font-weight="bold" text-anchor="middle">Tahap 1: Tarif Kontrak</text>
+
+    <!-- SECTION 5: REKONSILIASI INVOICE (AUDIT KEUANGAN LOGISTIK) -->
+    <g transform="translate(140, 710)">
+        <rect width="1020" height="180" rx="14" fill="#ffffff" stroke="#fb7185" stroke-width="2.5" filter="url(#shadow)"/>
+        <path d="M 0 14 Q 0 0 14 0 L 1006 0 Q 1020 0 1020 45 L 0 45 Z" fill="#fff1f2"/>
+        <text x="25" y="28" fill="#be123c" font-size="15" font-weight="bold">5. AUDIT &amp; REKONSILIASI INVOICE EKSPEDISI (FINANCIAL CONTROL)</text>
+        <text x="750" y="28" fill="#e11d48" font-size="12" font-weight="bold">INPUT: EXCEL TAGIHAN EKSPEDISI</text>
+
+        <g transform="translate(25, 55)">
+            <!-- Step 1 Audit -->
+            <rect width="310" height="110" rx="8" fill="#fff5f5" stroke="#fecdd3"/>
+            <text x="15" y="25" fill="#9f1239" font-size="12" font-weight="bold">1. Audit Tarif Kontrak (Stage 1)</text>
+            <text x="15" y="45" fill="#475569" font-size="11">• Hitung: Berat × Tarif Kontrak</text>
+            <text x="15" y="63" fill="#475569" font-size="11">• Cek Asuransi (DPP Nominal SJ × 0,2%)</text>
+            <text x="15" y="81" fill="#475569" font-size="11">• Deteksi Overcharge / Tarif Lebih Mahal</text>
+            <text x="15" y="99" fill="#e11d48" font-size="10" font-weight="bold">Status: SESUAI / KOREKSI / DISPUT</text>
+        </g>
+
+        <g transform="translate(355, 55)">
+            <!-- Step 2 Audit -->
+            <rect width="310" height="110" rx="8" fill="#f0fdf4" stroke="#bbf7d0"/>
+            <text x="15" y="25" fill="#166534" font-size="12" font-weight="bold">2. Audit Data Pengiriman (Stage 2)</text>
+            <text x="15" y="45" fill="#475569" font-size="11">• Cocokkan No Resi &amp; No Surat Jalan/TO</text>
+            <text x="15" y="63" fill="#475569" font-size="11">• Cek Kesesuaian Ekspedisi yang Ditunjuk</text>
+            <text x="15" y="81" fill="#475569" font-size="11">• Bandingkan Berat Tagihan vs Timbangan Gudang</text>
+            <text x="15" y="99" fill="#15803d" font-size="10" font-weight="bold">Status: COCOK / BEDA EKSPEDISI / BELUM ADA</text>
+        </g>
+
+        <g transform="translate(685, 55)">
+            <!-- Final Decision -->
+            <rect width="310" height="110" rx="8" fill="#eff6ff" stroke="#bfdbfe"/>
+            <text x="15" y="25" fill="#1e40af" font-size="12" font-weight="bold">3. Keputusan Pembayaran (Finance)</text>
+            <text x="15" y="45" fill="#475569" font-size="11">✓ Tagihan Valid → Masuk List Pembayaran</text>
+            <text x="15" y="63" fill="#475569" font-size="11">⚠️ Resi Bermasalah / Overcharge → Potong Tagihan</text>
+            <text x="15" y="81" fill="#475569" font-size="11">❌ Resi Liar (Tidak ada di gudang) → Tolak Tagihan</text>
+            <text x="15" y="99" fill="#2563eb" font-size="10" font-weight="bold">HASIL: EFISIENSI &amp; TIDAK BOCOR BIAYA</text>
+        </g>
+    </g>
+
+</svg>

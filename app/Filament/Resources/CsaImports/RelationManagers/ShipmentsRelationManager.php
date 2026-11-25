@@ -4,8 +4,10 @@ namespace App\Filament\Resources\CsaImports\RelationManagers;
 
 use App\Filament\Resources\CsaShipments\Schemas\CsaShipmentForm;
 use App\Filament\Resources\CsaShipments\Tables\CsaShipmentsTable;
+use BackedEnum;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 
 class ShipmentsRelationManager extends RelationManager
@@ -13,6 +15,8 @@ class ShipmentsRelationManager extends RelationManager
     protected static string $relationship = 'shipments';
 
     protected static ?string $title = 'Surat Jalan';
+
+    protected static string|BackedEnum|null $icon = Heroicon::OutlinedTruck;
 
     protected static ?string $modelLabel = 'Surat Jalan';
 

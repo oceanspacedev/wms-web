@@ -5,6 +5,7 @@ namespace App\Filament\Resources\ExpeditionRateCards;
 use App\Filament\Resources\ExpeditionRateCards\Pages\ManageExpeditionRateCards;
 use App\Models\ExpeditionRateCard;
 use BackedEnum;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -33,6 +34,8 @@ class ExpeditionRateCardResource extends Resource
 
     protected static ?string $modelLabel = 'Tarif Kontrak PKS';
 
+    protected static ?string $pluralModelLabel = 'Tarif Kontrak PKS';
+
     protected static ?int $navigationSort = 2;
 
     public static function form(Schema $schema): Schema
@@ -56,9 +59,15 @@ class ExpeditionRateCardResource extends Resource
                     ->required()
                     ->numeric(),
                 TextInput::make('min_kg')
+                    ->label('Min KG')
                     ->required()
                     ->numeric()
                     ->default(1),
+                Select::make('pricing_type')
+                    ->label('Jenis Tarif')
+                    ->options(ExpeditionRateCard::PRICING_LABELS)
+                    ->default(ExpeditionRateCard::PRICING_PER_KG)
+                    ->required(),
                 TextInput::make('insurance_rate_percent')
                     ->required()
                     ->numeric()
@@ -79,7 +88,8 @@ class ExpeditionRateCardResource extends Resource
                 TextColumn::make('expedition.name')
                     ->label('Ekspedisi')
                     ->sortable()
-                    ->searchable(),
+                    ->searchable()
+                    ->weight('bold'),
                 TextColumn::make('origin_depo')
                     ->label('Asal (Depo)')
                     ->sortable()
@@ -87,15 +97,13 @@ class ExpeditionRateCardResource extends Resource
                 TextColumn::make('destination_city')
                     ->label('Kota Tujuan')
                     ->sortable()
-                    ->searchable(),
+                    ->searchable(['destination_city', 'destination_district', 'province'])
+                    ->description(fn (ExpeditionRateCard $record): ?string => $record->province ?: null)
+                    ->tooltip(fn (ExpeditionRateCard $record): string => implode(', ', array_filter([$record->destination_city, $record->destination_district, $record->province])) ?: $record->destination_city),
                 TextColumn::make('destination_district')
                     ->label('Kecamatan')
-                    ->searchable()
-                    ->toggleable(),
-                TextColumn::make('province')
-                    ->label('Provinsi')
-                    ->searchable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->placeholder('-')
+                    ->searchable(),
                 TextColumn::make('service_type')
                     ->label('Layanan')
                     ->badge()
@@ -112,19 +120,35 @@ class ExpeditionRateCardResource extends Resource
                     ->sortable(),
                 TextColumn::make('min_kg')
                     ->label('Min KG')
-                    ->numeric()
-                    ->suffix(' KG')
+                    ->formatStateUsing(fn ($state, ExpeditionRateCard $record): string => $record->isFlatPricing()
+                        ? '–'
+                        : rtrim(rtrim(number_format((float) $state, 1, ',', '.'), '0'), ',').' KG')
                     ->sortable(),
-                TextColumn::make('insurance_rate_percent')
-                    ->label('Premi (%)')
-                    ->suffix('%')
+                TextColumn::make('pricing_type')
+                    ->label('Jenis')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => ExpeditionRateCard::PRICING_LABELS[$state] ?? 'Per KG')
+                    ->color(fn (?string $state): string => match ($state) {
+                        ExpeditionRateCard::PRICING_FLAT, ExpeditionRateCard::PRICING_PER_COLLY => 'warning',
+                        ExpeditionRateCard::PRICING_KUBIKASI => 'info',
+                        ExpeditionRateCard::PRICING_DOC => 'gray',
+                        default => 'success',
+                    })
                     ->sortable(),
                 TextColumn::make('sla_days')
                     ->label('SLA')
+                    ->placeholder('-')
+                    ->formatStateUsing(fn ($state): string => $state ? $state.' hr' : '-')
                     ->searchable(),
+                TextColumn::make('insurance_rate_percent')
+                    ->label('Premi (%)')
+                    ->suffix('%')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('notes')
                     ->label('Catatan')
-                    ->limit(20)
+                    ->limit(30)
+                    ->tooltip(fn (ExpeditionRateCard $record): ?string => $record->notes)
                     ->toggleable(isToggledHiddenByDefault: true),
                 IconColumn::make('is_active')
                     ->label('Aktif')
@@ -149,12 +173,19 @@ class ExpeditionRateCardResource extends Resource
                         'UDARA' => 'UDARA',
                         'LAUT' => 'LAUT',
                     ]),
+                SelectFilter::make('pricing_type')
+                    ->label('Jenis Tarif')
+                    ->options(ExpeditionRateCard::PRICING_LABELS),
                 TernaryFilter::make('is_active')
                     ->label('Status Aktif'),
             ])
             ->recordActions([
-                EditAction::make(),
-                DeleteAction::make(),
+                ActionGroup::make([
+                    EditAction::make(),
+                    DeleteAction::make(),
+                ])
+                    ->icon('heroicon-m-ellipsis-vertical')
+                    ->tooltip('Aksi'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
