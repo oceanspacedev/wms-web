@@ -323,7 +323,12 @@ class TransfersRelationManager extends RelationManager
 
         $to = $transfer->toLine;
         $from = $transfer->fromLine;
-        $target = $this->ownerRecord->target_dos;
+        $defaultTarget = $this->ownerRecord->target_dos;
+        $target = $to?->effectiveTargetDos($defaultTarget)
+            ?? $from?->effectiveTargetDos($defaultTarget)
+            ?? $defaultTarget;
+        $fromTarget = $from?->effectiveTargetDos($defaultTarget) ?? $target;
+        $toTarget = $to?->effectiveTargetDos($defaultTarget) ?? $target;
         $progress = $this->progress($transfer);
 
         $number = fn (int|float $value): string => number_format(
@@ -360,13 +365,13 @@ class TransfersRelationManager extends RelationManager
 
         $fromStock = (float) $from->stock;
         $fromLaku = (float) $from->avg_daily_sales;
-        $fromTargetQty = (int) ceil($target * $fromLaku);
-        $extra = max(0, (int) floor($fromStock - $target * $fromLaku));
+        $fromTargetQty = (int) ceil($fromTarget * $fromLaku);
+        $extra = max(0, (int) floor($fromStock - $fromTarget * $fromLaku));
 
         $toStock = (float) $to->stock;
         $toIncoming = (float) $to->incoming;
         $toLaku = (float) $to->avg_daily_sales;
-        $toTargetQty = (int) ceil($target * $toLaku);
+        $toTargetQty = (int) ceil($toTarget * $toLaku);
 
         $salesPrefix = $this->ownerRecord->usesStockReport() ? 'Penjualan CSA' : 'Total terjual';
         $salesLabel = fn (StockAllocationLine $line): string => $line->sales_days > 0
@@ -431,7 +436,7 @@ class TransfersRelationManager extends RelationManager
             'dailySales' => $dailySales($from),
             'bufferQty' => $units($fromTargetQty),
             'surplusQty' => '+'.$units($extra),
-            'surplusCaption' => $fromLaku > 0 ? 'aman dikirim di atas buffer '.$target.' hari' : 'tidak ada penjualan, aman dipindahkan',
+            'surplusCaption' => $fromLaku > 0 ? 'aman dikirim di atas buffer '.$fromTarget.' hari' : 'tidak ada penjualan, aman dipindahkan',
             'dosTransition' => $dosTransition($from),
             'stockAfter' => $units($from->stockAfter()),
             'transfersTitle' => 'Dikirim ke',
