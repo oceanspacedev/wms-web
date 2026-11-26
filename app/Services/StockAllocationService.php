@@ -163,8 +163,8 @@ class StockAllocationService
                 $line->target_dos = $lineTarget;
                 $line->avg_daily_sales = round($this->daily($line), 2);
                 $line->dos_before = $this->dos($line, $line->stock);
-                $line->status = $this->status($line->dos_before, $lineTarget);
                 $line->need_qty = max(0, (int) ceil(round($this->ideal($line, $lineTarget) - $line->stock - $line->incoming, 6)));
+                $line->status = $this->status($line->dos_before, $lineTarget, $line->need_qty);
             }
 
             $transfers = [];
@@ -627,15 +627,9 @@ class StockAllocationService
         }
     }
 
-    private function status(?float $dos, int $target): string
+    private function status(?float $dos, int $target, int $needQty = 0): string
     {
-        return match (true) {
-            $dos === null => 'no_sales',
-            $dos <= 7 => 'critical',
-            $dos <= 14 => 'warning',
-            $dos <= $target => 'healthy',
-            default => 'overstock',
-        };
+        return StockAllocationLine::classifyStatus($dos, $target, $needQty);
     }
 
     /**

@@ -111,6 +111,7 @@ class StockAllocationTest extends TestCase
         $this->assertEqualsWithDelta(120.0, $cirebon->dos_after, 0.01);
 
         $this->assertSame('no_sales', $allocation->lines()->where('warehouse', 'GTTSK')->sole()->status);
+        $this->assertSame('warning', $allocation->lines()->where('warehouse', 'GTKRW')->sole()->status);
         $this->assertSame(25, $allocation->lines()->where('warehouse', 'GTSMG')->sole()->po_qty);
     }
 
@@ -215,6 +216,7 @@ class StockAllocationTest extends TestCase
 
         Livewire::test(LinesRelationManager::class, ['ownerRecord' => $allocation, 'pageClass' => ViewStockAllocation::class])
             ->assertCanSeeTableRecords($allocation->lines)
+            ->assertSee('target 30 hari')
             ->filterTable('needs_po')
             ->assertCanSeeTableRecords($allocation->lines()->where('po_qty', '>', 0)->get())
             ->assertCanNotSeeTableRecords($allocation->lines()->where('po_qty', 0)->get());
@@ -280,6 +282,16 @@ class StockAllocationTest extends TestCase
         $this->assertSame(3, $count('Saran Transfer'));
         $this->assertSame(StockAllocationLine::count(), $count('Per Gudang'));
         $this->assertSame(1, $count('Rekomendasi PO'));
+
+        $zip = new \ZipArchive;
+        $this->assertTrue($zip->open($path) === true);
+        foreach (['xl/worksheets/sheet1.xml', 'xl/worksheets/sheet2.xml', 'xl/worksheets/sheet3.xml'] as $sheetXml) {
+            $xml = (string) $zip->getFromName($sheetXml);
+            $this->assertStringContainsString('<cols>', $xml);
+            $this->assertStringContainsString('ySplit="1"', $xml);
+            $this->assertStringContainsString('<autoFilter', $xml);
+        }
+        $zip->close();
 
         @unlink($path);
     }

@@ -234,7 +234,7 @@ class ViewStockAllocation extends ViewRecord
             '<b>Data.</b> '.$sources,
             '<b>Laku per hari</b> = jumlah terjual ÷ jumlah hari periode penjualan.',
             '<b>Target DOS.</b> Menggunakan '.$targetNote.'.',
-            '<b>DOS</b> = stok ÷ laku per hari, artinya stok cukup untuk berapa hari. ≤ 7 hari KRITIS, ≤ 14 WASPADA, ≤ target DOS AMAN, lebih dari itu OVERSTOCK.',
+            '<b>DOS</b> = stok ÷ laku per hari, artinya stok cukup untuk berapa hari. ≤ 7 hari KRITIS, di bawah target KURANG TARGET, memenuhi target AMAN, lebih dari target BERLEBIH.',
             '<b>Kebutuhan</b> gudang = target DOS × laku per hari − stok − incoming.',
             '<b>Bisa dikirim</b> = stok fisik − target DOS × laku per hari. Incoming tidak dihitung supaya gudang pengirim tidak kosong kalau barang di jalan terlambat. Barang yang tidak laku di suatu gudang bisa dikirim semuanya.',
             '<b>Urutan.</b> Gudang paling kritis dilayani lebih dulu, diambil dari gudang paling berlebih di region yang sama, lalu dari gudang PUSAT. PUSAT terhubung ke semua region: bisa mengirim ke depo mana pun dan menerima dari depo mana pun kalau stoknya sendiri kurang.',

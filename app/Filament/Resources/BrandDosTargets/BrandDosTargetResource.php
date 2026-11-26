@@ -93,7 +93,6 @@ class BrandDosTargetResource extends Resource
 
                 TextColumn::make('label')
                     ->label('Brand')
-                    ->weight('bold')
                     ->searchable(['label', 'brand'])
                     ->sortable(),
 

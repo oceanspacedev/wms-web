@@ -30,7 +30,7 @@ class ExpeditionRateCardResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Ekspedisi';
 
-    protected static ?string $navigationLabel = 'Tarif Kontrak (Rate Card)';
+    protected static ?string $navigationLabel = 'Tarif Kontrak';
 
     protected static ?string $modelLabel = 'Tarif Kontrak PKS';
 

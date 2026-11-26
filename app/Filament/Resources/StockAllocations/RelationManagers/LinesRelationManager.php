@@ -40,25 +40,30 @@ class LinesRelationManager extends RelationManager
             // Judul sudah ada di tab, jadi tidak diulang di atas tabel
             ->heading(null)
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['transfersIn', 'transfersOut']))
-            ->defaultSort(fn (Builder $query): Builder => $query->orderBy('region')->orderBy('warehouse')->orderBy('product_name'))
+            ->defaultSort(fn (Builder $query): Builder => $query
+                ->orderByRaw("CASE status WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 WHEN 'healthy' THEN 3 WHEN 'overstock' THEN 4 ELSE 5 END")
+                ->orderByDesc('po_qty')
+                ->orderBy('warehouse')
+                ->orderBy('product_name'))
+            ->striped()
             ->paginated([25, 50, 100])
             ->columns([
-                // Region & kode SKU muncul saat kursor diarahkan, supaya tabel tidak penuh teks
+                // Region & kode SKU muncul saat kursor diarahkan atau sebagai teks kecil, supaya tabel tetap ringkas
                 TextColumn::make('warehouse')
                     ->label('Gudang')
                     ->weight('medium')
-                    ->tooltip(fn (StockAllocationLine $record): string => $record->region)
+                    ->description(fn (StockAllocationLine $record): string => $record->region)
                     ->sortable(),
                 TextColumn::make('product_name')
                     ->label('Produk')
-                    ->tooltip(fn (StockAllocationLine $record): string => $record->sku)
+                    ->description(fn (StockAllocationLine $record): string => $record->sku)
                     ->searchable(['product_name', 'sku', 'brand'])
                     ->wrap(),
                 TextColumn::make('stock')
                     ->label('Stok')
                     ->numeric(locale: 'id')
                     ->alignment(Alignment::End)
-                    ->description(fn (StockAllocationLine $record): ?string => $record->incoming > 0 ? '+'.$record->incoming.' incoming' : null)
+                    ->description(fn (StockAllocationLine $record): ?string => $record->incoming > 0 ? '+'.number_format((float) $record->incoming, 0, ',', '.').' incoming' : null)
                     ->tooltip(fn (StockAllocationLine $record): string => 'Stok fisik gudang: '.number_format((float) $record->stock, 0, ',', '.').' unit'.($record->incoming > 0 ? ' (+'.number_format((float) $record->incoming, 0, ',', '.').' incoming di jalan)' : ''))
                     ->sortable(),
                 TextColumn::make('avg_daily_sales')
@@ -68,12 +73,18 @@ class LinesRelationManager extends RelationManager
                         if ($val <= 0) {
                             return '0';
                         }
-                        if ($val < 1 && round($val) === 0.0) {
-                            return '< 1';
+                        if ($val < 0.1) {
+                            return number_format($val, 2, ',', '.');
+                        }
+                        if ($val < 10) {
+                            return rtrim(rtrim(number_format($val, 1, ',', '.'), '0'), ',');
                         }
 
                         return number_format(round($val), 0, ',', '.');
                     })
+                    ->description(fn (StockAllocationLine $record): ?string => (int) $record->sales_qty > 0
+                        ? number_format((int) $record->sales_qty, 0, ',', '.').' / '.$record->sales_days.' hr'
+                        : null)
                     ->tooltip(function (StockAllocationLine $record): string {
                         $val = (float) $record->avg_daily_sales;
                         if ($val <= 0) {
@@ -85,7 +96,7 @@ class LinesRelationManager extends RelationManager
                     ->alignment(Alignment::End)
                     ->sortable(),
                 TextColumn::make('dos_before')
-                    // DOS dalam bahasa biasa: stok cukup untuk berapa hari, sebelum → sesudah transfer
+                    // DOS dalam bahasa biasa: stok cukup untuk berapa hari, beserta target DOS brand
                     ->label('Ketahanan')
                     ->state(function (StockAllocationLine $record): string {
                         if ($record->dos_before === null) {
@@ -96,6 +107,9 @@ class LinesRelationManager extends RelationManager
 
                         return $before === $after ? $before.' hari' : $before.' → '.$after.' hari';
                     })
+                    ->description(fn (StockAllocationLine $record): ?string => $record->dos_before !== null
+                        ? 'target '.$record->effectiveTargetDos($this->ownerRecord->target_dos).' hari'
+                        : null)
                     ->tooltip(function (StockAllocationLine $record): ?string {
                         if ($record->dos_before === null || (float) $record->avg_daily_sales <= 0) {
                             return 'Barang tidak laku di gudang ini (penjualan 0)';
@@ -107,7 +121,7 @@ class LinesRelationManager extends RelationManager
                         $hariAfter = StockAllocationResource::days($record->dos_after);
                         $target = $record->effectiveTargetDos($this->ownerRecord->target_dos);
 
-                        $text = "Target DOS: {$target} hari.\nSebelum: stok {$number($stok)} ÷ laku ".number_format($laku, 1, ',', '.')."/hari = cukup {$hariBefore} hari.";
+                        $text = "Target DOS: {$target} hari.\nSebelum: stok {$number($stok)} ÷ laku ".number_format($laku, 2, ',', '.')."/hari = cukup {$hariBefore} hari.";
                         if ($record->transfer_in > 0 || $record->transfer_out > 0) {
                             $text .= "\nSesudah mutasi: stok cukup {$hariAfter} hari.";
                         }
@@ -120,25 +134,21 @@ class LinesRelationManager extends RelationManager
                     ->badge()
                     ->formatStateUsing(fn (StockAllocationLine $record): string => match ($record->status) {
                         'critical' => 'Kritis',
-                        'warning' => 'Waspada',
+                        'warning' => 'Kurang Target',
                         'healthy' => 'Aman',
                         'overstock' => 'Berlebih',
                         'no_sales' => 'Tanpa penjualan',
                         default => $record->statusLabel(),
                     })
-                    ->color(fn (StockAllocationLine $record): string => match ($record->status) {
-                        'critical' => 'danger',
-                        'warning' => 'warning',
-                        default => 'gray',
-                    })
+                    ->color(fn (StockAllocationLine $record): string => StockAllocationLine::STATUS_COLORS[$record->status] ?? 'gray')
                     ->tooltip(function (StockAllocationLine $record): string {
                         $target = $record->effectiveTargetDos($this->ownerRecord->target_dos);
 
                         return match ($record->status) {
-                            'critical' => 'Stok kritis (cukup ≤ 7 hari), segera isi ulang!',
-                            'warning' => "Stok waspada (di bawah target buffer {$target} hari)",
-                            'healthy' => "Stok aman dan cukup untuk target {$target} hari",
-                            'overstock' => "Stok berlebih (> {$target} hari), dapat dipindahkan ke cabang yang kekurangan",
+                            'critical' => 'Stok fisik kritis (≤ 7 hari), segera isi ulang!',
+                            'warning' => "Stok di bawah target {$target} hari, perlu tambahan transfer atau PO",
+                            'healthy' => "Stok (+ incoming) sudah memenuhi target {$target} hari",
+                            'overstock' => "Stok melebihi target {$target} hari, dapat dipindahkan ke cabang yang kekurangan",
                             'no_sales' => 'Tidak ada penjualan di gudang ini',
                             default => '',
                         };
@@ -194,7 +204,13 @@ class LinesRelationManager extends RelationManager
                     ->options(fn (): array => $this->distinct('warehouse')),
                 SelectFilter::make('status')
                     ->label('Status')
-                    ->options(StockAllocationLine::STATUS_LABELS),
+                    ->options([
+                        'critical' => 'Kritis (≤ 7 hari)',
+                        'warning' => 'Kurang Target (< target)',
+                        'healthy' => 'Aman (memenuhi target)',
+                        'overstock' => 'Berlebih (> target)',
+                        'no_sales' => 'Tanpa penjualan',
+                    ]),
                 Filter::make('needs_po')
                     ->label('Perlu PO')
                     ->query(fn (Builder $query): Builder => $query->where('po_qty', '>', 0)),

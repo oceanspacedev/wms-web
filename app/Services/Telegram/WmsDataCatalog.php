@@ -229,7 +229,7 @@ class WmsDataCatalog
                     'avg_daily_sales' => ['tipe' => 'angka', 'ket' => 'Laku per hari'],
                     'dos_before' => ['tipe' => 'angka', 'ket' => 'Stok cukup untuk (hari) sebelum transfer; kosong = tidak laku'],
                     'dos_after' => ['tipe' => 'angka', 'ket' => 'Stok cukup untuk (hari) setelah transfer'],
-                    'status' => ['tipe' => 'teks', 'ket' => 'critical (≤7 hari), warning (≤14), healthy, overstock, no_sales'],
+                    'status' => ['tipe' => 'teks', 'ket' => 'critical (≤7 hari), warning (kurang target), healthy (memenuhi target), overstock (> target), no_sales'],
                     'need_qty' => ['tipe' => 'angka', 'ket' => 'Kekurangan untuk target'],
                     'transfer_in' => ['tipe' => 'angka'],
                     'transfer_out' => ['tipe' => 'angka'],
@@ -291,7 +291,7 @@ class WmsDataCatalog
                 ],
             ],
             'tarif_kontrak' => [
-                'menu' => 'Tarif Kontrak (Rate Card)',
+                'menu' => 'Tarif Kontrak',
                 'keterangan' => 'Tarif kontrak ekspedisi per kg dari depo asal ke kota tujuan.',
                 'model' => ExpeditionRateCard::class,
                 'izin' => ExpeditionRateCard::class,
@@ -373,7 +373,7 @@ class WmsDataCatalog
                 ],
             ],
             'pemetaan_gudang' => [
-                'menu' => 'Pemetaan Gudang ke Cabang',
+                'menu' => 'Master Gudang',
                 'keterangan' => 'Kode gudang CSA → cabang Data Pengiriman & region alokasi stok.',
                 'model' => WarehouseMapping::class,
                 'izin' => WarehouseMapping::class,

@@ -27,9 +27,11 @@ class WarehouseMappingResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Master Data';
 
-    protected static ?string $navigationLabel = 'Pemetaan Gudang ke Cabang';
+    protected static ?string $navigationLabel = 'Master Gudang';
 
     protected static ?string $modelLabel = 'Pemetaan Gudang';
+
+    protected static ?string $pluralModelLabel = 'Master Gudang';
 
     protected static ?int $navigationSort = 3;
 
