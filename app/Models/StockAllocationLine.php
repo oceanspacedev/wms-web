@@ -12,15 +12,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class StockAllocationLine extends Model
 {
     /**
-     * Status DOS sebelum transfer (batas mengikuti file DOS: ≤7 kritis, ≤14 waspada, ≤ target aman).
+     * Status DOS terhadap Target DOS brand (≤7 kritis, <target & butuh stok = kurang target, memenuhi target = aman, >target = berlebih).
      *
      * @var array<string, string>
      */
     public const STATUS_LABELS = [
         'critical' => 'KRITIS',
-        'warning' => 'WASPADA',
+        'warning' => 'KURANG TARGET',
         'healthy' => 'AMAN',
-        'overstock' => 'OVERSTOCK',
+        'overstock' => 'BERLEBIH',
         'no_sales' => 'TIDAK ADA PENJUALAN',
     ];
 
@@ -118,6 +118,20 @@ class StockAllocationLine extends Model
     public function statusLabel(): string
     {
         return self::STATUS_LABELS[$this->status] ?? $this->status;
+    }
+
+    /**
+     * Klasifikasi status stok terhadap Target DOS brand (dipakai service & sinkronisasi data lama).
+     */
+    public static function classifyStatus(?float $dos, int $target, int $needQty = 0): string
+    {
+        return match (true) {
+            $dos === null => 'no_sales',
+            $dos <= 7 => 'critical',
+            $dos < $target && $needQty > 0 => 'warning',
+            $dos <= $target => 'healthy',
+            default => 'overstock',
+        };
     }
 
     public function statusColor(): string
