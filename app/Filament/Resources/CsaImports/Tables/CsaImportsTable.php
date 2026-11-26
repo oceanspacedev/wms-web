@@ -26,7 +26,15 @@ class CsaImportsTable
                     ->sortable()
                     ->weight('bold')
                     // Jenis laporan baru diketahui setelah file diekstrak
-                    ->description(fn (CsaImport $record): ?string => $record->report_type === CsaImport::REPORT_TRANSFER ? $record->reportLabel() : null),
+                    ->description(function (CsaImport $record): ?string {
+                        if ($record->status !== 'completed') {
+                            return null;
+                        }
+
+                        return $record->report_type === CsaImport::REPORT_TRANSFER
+                            ? $record->reportLabel()
+                            : 'Penjualan CSA (SJ)';
+                    }),
 
                 TextColumn::make('user.name')
                     ->label('Pengunggah')

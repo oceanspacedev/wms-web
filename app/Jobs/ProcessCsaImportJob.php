@@ -65,9 +65,11 @@ class ProcessCsaImportJob implements ShouldQueue
                 'summary_by_sheet' => $result['by_sheet'],
             ]);
 
-            [$totalNew, $totalUpdated, $totalSkipped] = $reportType === CsaImport::REPORT_TRANSFER
-                ? $this->saveTransferOrders($result['shipments'])
-                : $this->saveShipments($result['shipments']);
+            [$totalNew, $totalUpdated, $totalSkipped] = CsaShipment::withoutLookupCacheFlush(
+                fn (): array => $reportType === CsaImport::REPORT_TRANSFER
+                    ? $this->saveTransferOrders($result['shipments'])
+                    : $this->saveShipments($result['shipments'])
+            );
 
             $this->saveItems($result['items'] ?? []);
 

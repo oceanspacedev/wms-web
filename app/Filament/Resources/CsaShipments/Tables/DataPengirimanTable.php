@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CsaShipments\Tables;
 
+use App\Filament\Resources\CsaShipments\Pages\ListCsaShipments;
 use App\Filament\Resources\CsaShipments\Schemas\DataPengirimanForm;
 use App\Models\CsaImport;
 use App\Models\CsaShipment;
@@ -20,10 +21,12 @@ use Filament\Tables\Columns\Column;
 use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\TextInputColumn;
+use Filament\Tables\Enums\PaginationMode;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 /**
@@ -37,8 +40,11 @@ class DataPengirimanTable
             ->columns(static::columns())
             ->defaultSort('tanggal_kirim', 'desc')
             ->striped()
-            ->paginated([25, 50, 100])
-            ->defaultPaginationPageOption(50)
+            ->paginationMode(PaginationMode::Simple)
+            ->paginated([15, 25, 50, 100])
+            ->defaultPaginationPageOption(25)
+            ->selectCurrentPageOnly()
+            ->searchDebounce('750ms')
             ->persistFiltersInSession()
             // Dua kolom di popup filter supaya tidak memanjang ke bawah
             ->filtersFormColumns(2)
@@ -75,8 +81,8 @@ class DataPengirimanTable
                     ->columns(2)
                     ->columnSpanFull()
                     ->query(fn (Builder $query, array $data): Builder => $query
-                        ->when($data['dari'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('tanggal_kirim', '>=', $date))
-                        ->when($data['sampai'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('tanggal_kirim', '<=', $date)))
+                        ->when($data['dari'] ?? null, fn (Builder $q, $date): Builder => $q->where('tanggal_kirim', '>=', Carbon::parse($date)->toDateString()))
+                        ->when($data['sampai'] ?? null, fn (Builder $q, $date): Builder => $q->where('tanggal_kirim', '<=', Carbon::parse($date)->toDateString())))
                     ->indicateUsing(function (array $data): ?string {
                         if (blank($data['dari'] ?? null) && blank($data['sampai'] ?? null)) {
                             return null;
@@ -92,7 +98,17 @@ class DataPengirimanTable
 
                 SelectFilter::make('brand')
                     ->label('Brand')
-                    ->options(fn (): array => CsaShipment::query()->whereNotNull('brand')->where('brand', '!=', '')->distinct()->orderBy('brand')->pluck('brand', 'brand')->all())
+                    ->options(fn (): array => CsaShipment::cached(
+                        'brand_options:'.md5((string) auth()->user()?->cabangScope()),
+                        fn (): array => CsaShipment::query()
+                            ->visibleTo(auth()->user())
+                            ->whereNotNull('brand')
+                            ->where('brand', '!=', '')
+                            ->distinct()
+                            ->orderBy('brand')
+                            ->pluck('brand', 'brand')
+                            ->all(),
+                    ))
                     ->searchable(),
 
                 SelectFilter::make('jenis')
@@ -107,11 +123,20 @@ class DataPengirimanTable
                         default => $query,
                     }),
 
+                SelectFilter::make('badan_usaha')
+                    ->label('Badan Usaha')
+                    ->options(fn (): array => ListCsaShipments::badanUsahaOptions())
+                    ->searchable()
+                    ->query(fn (Builder $query, array $data): Builder => ListCsaShipments::filterByBadanUsaha($query, $data['value'] ?? null)),
+
                 SelectFilter::make('csa_import_id')
                     ->label('Upload Laporan')
-                    ->options(fn (): array => CsaImport::query()->latest('id')->limit(30)->get()
-                        ->mapWithKeys(fn (CsaImport $import): array => [$import->id => '#'.$import->id.' · '.$import->created_at?->format('d/m/Y H:i').' · '.$import->reportLabel()])
-                        ->all()),
+                    ->options(fn (): array => CsaShipment::cached(
+                        'csa_import_filter_options',
+                        fn (): array => CsaImport::query()->latest('id')->limit(30)->get()
+                            ->mapWithKeys(fn (CsaImport $import): array => [$import->id => '#'.$import->id.' · '.$import->created_at?->format('d/m/Y H:i').' · '.$import->reportLabel()])
+                            ->all(),
+                    )),
 
                 SelectFilter::make('source')
                     ->label('Sumber Data')
@@ -124,7 +149,7 @@ class DataPengirimanTable
                         $latest = static::latestUploadWithNewRows();
 
                         return $latest
-                            ? $query->where('csa_import_id', $latest->id)->where('created_at', '>=', $latest->created_at)
+                            ? $query->where('csa_import_id', $latest['id'])->where('created_at', '>=', $latest['created_at'])
                             : $query->whereRaw('1 = 0');
                     }),
             ])
@@ -154,7 +179,7 @@ class DataPengirimanTable
      */
     public static function columns(): array
     {
-        $readOnly = fn (CsaShipment $record): bool => ! static::canEdit($record);
+        $readOnly = fn (): bool => ! static::canUpdate();
 
         return [
             TextColumn::make('tanggal_order')
@@ -179,12 +204,12 @@ class DataPengirimanTable
                 ->label('TUJUAN/DEALER')
                 ->searchable()
                 ->limit(30)
-                ->tooltip(fn (CsaShipment $record): ?string => $record->tujuan_dealer)
+                ->tooltip(fn (CsaShipment $record): ?string => mb_strlen((string) $record->tujuan_dealer) > 30 ? $record->tujuan_dealer : null)
                 ->toggleable(),
             TextColumn::make('alamat_kirim')
                 ->label('ALAMAT KIRIM')
                 ->limit(35)
-                ->tooltip(fn (CsaShipment $record): ?string => $record->alamat_kirim)
+                ->tooltip(fn (CsaShipment $record): ?string => mb_strlen((string) $record->alamat_kirim) > 35 ? $record->alamat_kirim : null)
                 ->toggleable(),
             TextColumn::make('nama_kota')
                 ->label('NAMA KOTA')
@@ -284,7 +309,7 @@ class DataPengirimanTable
             TextColumn::make('ket_isi_unit')
                 ->label('KET. ISI UNIT')
                 ->limit(30)
-                ->tooltip(fn (CsaShipment $record): ?string => $record->ket_isi_unit)
+                ->tooltip(fn (CsaShipment $record): ?string => mb_strlen((string) $record->ket_isi_unit) > 30 ? $record->ket_isi_unit : null)
                 ->toggleable(),
 
             // Tambahan web yang tidak ada di spreadsheet: tersembunyi, bisa dimunculkan lewat tombol kolom
@@ -358,8 +383,7 @@ class DataPengirimanTable
      */
     private static function cabangOptions(): array
     {
-        // Diminta beberapa kali per render (form filter & indikator), cukup dihitung sekali per request
-        return once(function (): array {
+        return CsaShipment::cached('cabang_options', function (): array {
             $counts = CsaShipment::query()
                 ->toBase()
                 ->selectRaw('target_sheet, COUNT(*) as total')
@@ -382,31 +406,47 @@ class DataPengirimanTable
     {
         $latest = static::latestUploadWithNewRows();
 
-        return $latest
-            && $record->csa_import_id === $latest->id
-            && $record->created_at?->greaterThanOrEqualTo($latest->created_at);
+        return $latest !== null
+            && $record->csa_import_id === $latest['id']
+            && ($record->created_at?->getTimestamp() ?? 0) >= $latest['timestamp'];
     }
 
     /**
      * Upload CSA terakhir yang benar-benar menambah SJ baru. Upload yang isinya hanya memperbarui SJ lama
      * tidak menggeser tanda "terbaru", sama seperti warna biru di spreadsheet. Upload yang mengisi tabel
      * pertama kali dianggap data awal (belum ada data lama sebagai pembanding), jadi tidak ditandai.
+     *
+     * @return ?array{id: int, timestamp: int, created_at: string}
      */
-    private static function latestUploadWithNewRows(): ?CsaImport
+    private static function latestUploadWithNewRows(): ?array
     {
-        return once(function (): ?CsaImport {
+        /** @var array{meta: ?array{id: int, timestamp: int, created_at: string}} $cached */
+        $cached = CsaShipment::cached('latest_upload_with_new_rows_meta', function (): array {
             $latest = CsaImport::query()
                 ->where('status', 'completed')
                 ->whereHas('shipments', fn (Builder $query): Builder => $query->whereColumn('csa_shipments.created_at', '>=', 'csa_imports.created_at'))
                 ->latest('id')
                 ->first();
 
-            if (! $latest || CsaShipment::query()->where('created_at', '<', $latest->created_at)->doesntExist()) {
-                return null;
+            if (! $latest || ! $latest->created_at || CsaShipment::query()->where('created_at', '<', $latest->created_at)->doesntExist()) {
+                return ['meta' => null];
             }
 
-            return $latest;
+            return [
+                'meta' => [
+                    'id' => (int) $latest->id,
+                    'timestamp' => (int) $latest->created_at->getTimestamp(),
+                    'created_at' => $latest->created_at->format('Y-m-d H:i:s'),
+                ],
+            ];
         });
+
+        return $cached['meta'];
+    }
+
+    private static function canUpdate(): bool
+    {
+        return (bool) once(fn (): bool => (bool) auth()->user()?->can('update', new CsaShipment));
     }
 
     private static function canEdit(CsaShipment $record): bool

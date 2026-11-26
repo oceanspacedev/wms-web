@@ -4,7 +4,9 @@ namespace App\Filament\Resources\CsaShipments\Schemas;
 
 use App\Models\CsaShipment;
 use App\Support\ShipmentOptions;
+use Carbon\CarbonInterface;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -24,6 +26,16 @@ class DataPengirimanForm
         return $schema
             ->columns(1)
             ->components([
+                Hidden::make('_initial_snapshot')
+                    ->dehydrated(true)
+                    ->afterStateHydrated(function (Hidden $component, ?CsaShipment $record): void {
+                        if (! $record) {
+                            return;
+                        }
+
+                        $component->state(json_encode(static::snapshotAttributes($record)));
+                    }),
+
                 Section::make('Data Surat Jalan')
                     ->description(fn (?CsaShipment $record): string => static::isFromReport($record)
                         ? 'Dari laporan '.($record->source === CsaShipment::SOURCE_TO ? 'realisasi TO' : 'CSA').'. Diperbarui otomatis setiap upload, tidak bisa diubah di sini.'
@@ -136,13 +148,66 @@ class DataPengirimanForm
      */
     public static function protectCsaFields(array $data, CsaShipment $record): array
     {
-        if (! static::isFromReport($record)) {
-            return $data;
+        $rawSnapshot = $data['_initial_snapshot'] ?? null;
+        unset($data['_initial_snapshot']);
+
+        if (static::isFromReport($record)) {
+            $data = collect($data)
+                ->except([...CsaShipment::CSA_FIELDS, 'no_sj', 'badan_usaha', 'csa_import_id', 'source'])
+                ->all();
         }
 
-        return collect($data)
-            ->except([...CsaShipment::CSA_FIELDS, 'no_sj', 'badan_usaha', 'csa_import_id', 'source'])
-            ->all();
+        if (is_string($rawSnapshot)) {
+            /** @var array<string, mixed>|null $snapshot */
+            $snapshot = json_decode($rawSnapshot, true);
+            if (is_array($snapshot)) {
+                $data = array_filter(
+                    $data,
+                    fn (mixed $value, string $field): bool => ! array_key_exists($field, $snapshot)
+                        || static::normalizedCompare($value) !== static::normalizedCompare($snapshot[$field]),
+                    ARRAY_FILTER_USE_BOTH,
+                );
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function snapshotAttributes(CsaShipment $record): array
+    {
+        $fields = [
+            'tanggal_order', 'tanggal_kirim', 'badan_usaha', 'target_sheet', 'tujuan_dealer',
+            'alamat_kirim', 'nama_kota', 'brand', 'no_sj', 'total_nominal_sj', 'reff_note',
+            'qty_unit', 'ket_isi_unit', ...CsaShipment::FILL_IF_EMPTY_FIELDS,
+        ];
+
+        $snapshot = [];
+        foreach ($fields as $field) {
+            $val = $record->getAttribute($field);
+            $snapshot[$field] = $val instanceof CarbonInterface ? $val->format('Y-m-d') : $val;
+        }
+
+        return $snapshot;
+    }
+
+    private static function normalizedCompare(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        if ($value instanceof CarbonInterface) {
+            return $value->format('Y-m-d');
+        }
+
+        if (is_numeric($value)) {
+            return rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.');
+        }
+
+        return (string) $value;
     }
 
     private static function cabang(Get $get): ?string

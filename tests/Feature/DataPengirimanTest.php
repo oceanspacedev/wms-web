@@ -6,6 +6,7 @@ use App\Filament\Resources\CsaShipments\Pages\ListCsaShipments;
 use App\Filament\Resources\CsaShipments\Tables\DataPengirimanTable;
 use App\Jobs\ImportShipmentSpreadsheetJob;
 use App\Jobs\ProcessCsaImportJob;
+use App\Models\AppSetting;
 use App\Models\CsaImport;
 use App\Models\CsaShipment;
 use App\Models\Expedition;
@@ -38,7 +39,7 @@ class DataPengirimanTest extends TestCase
 
     private const PERMISSIONS = [
         'ViewAny:CsaShipment', 'View:CsaShipment', 'Create:CsaShipment', 'Update:CsaShipment',
-        'Delete:CsaShipment', 'DeleteAny:CsaShipment',
+        'Delete:CsaShipment', 'DeleteAny:CsaShipment', 'ResetDataPengiriman',
     ];
 
     public function test_reupload_updates_csa_data_without_overwriting_admin_fields(): void
@@ -407,6 +408,48 @@ class DataPengirimanTest extends TestCase
             ->assertFileDownloaded();
     }
 
+    public function test_export_action_filters_by_jenis_badan_usaha_and_month(): void
+    {
+        $sjMsi = $this->shipment('2610000001', 'CIREBON', [
+            'badan_usaha' => 'PT. MEDIA SELULLER INDONESIA',
+            'tanggal_kirim' => '2026-10-15',
+        ]);
+        $this->shipment('2610000002', 'CIREBON', [
+            'badan_usaha' => 'CV. TOP SELULAR',
+            'tanggal_kirim' => '2026-10-15',
+        ]);
+        $this->shipment('2610000003-01', 'CIREBON', [
+            'source' => CsaShipment::SOURCE_TO,
+            'badan_usaha' => 'PT. MEDIA SELULAR INDONESIA',
+            'tanggal_kirim' => '2026-10-15',
+        ]);
+        $this->shipment('2609000001', 'CIREBON', [
+            'badan_usaha' => 'PT. MEDIA SELULAR INDONESIA',
+            'tanggal_kirim' => '2026-09-10',
+        ]);
+
+        $this->actingAs($this->centralAdmin());
+
+        Livewire::test(ListCsaShipments::class)
+            ->callAction('export', data: [
+                'jenis' => 'sj',
+                'badan_usaha' => 'PT. MEDIA SELULAR INDONESIA',
+                'bulan' => '2026-10',
+            ])
+            ->assertFileDownloaded('Data Pengiriman Semua Cabang SJ PT. MEDIA SELULAR INDONESIA 2026-10.xlsx');
+
+        $filtered = ListCsaShipments::filterByBadanUsaha(
+            CsaShipment::query()->transferOrders(false)->whereBetween('tanggal_kirim', ['2026-10-01', '2026-10-31']),
+            'PT. MEDIA SELULAR INDONESIA',
+        )->pluck('id')->all();
+
+        $this->assertSame([$sjMsi->id], $filtered);
+        $this->assertSame('PT. RETAIL INDONESIA SELALU MAJU', ListCsaShipments::canonicalBadanUsaha('PT. RETAIL INDONESIA SELLAU MAJU'));
+        $this->assertSame('PT. SATU MEDIA INDONESIA', ListCsaShipments::canonicalBadanUsaha('PT. SATU MEDIA INODNESIA'));
+        $this->assertSame('CV. MAJU TEKNOLOGI', ListCsaShipments::canonicalBadanUsaha('CV. MAJU TECNOLOGI'));
+        $this->assertSame('', ListCsaShipments::canonicalBadanUsaha('BADAN USAHA'));
+    }
+
     public function test_spreadsheet_import_copies_each_tab_into_its_branch(): void
     {
         $path = $this->spreadsheet([
@@ -546,6 +589,210 @@ class DataPengirimanTest extends TestCase
 
         $job->failed(new Exception('File rusak'));
         $this->assertContains('Import spreadsheet gagal', $admin->notifications()->get()->pluck('data.title')->all());
+    }
+
+    public function test_lookup_cache_refreshes_when_new_shipment_or_expedition_is_added(): void
+    {
+        $this->shipment('SJ-1', 'MEDAN', ['brand' => 'TECNO', 'nama_ekspedisi' => 'RAX']);
+        $this->actingAs($this->centralAdmin());
+
+        $page = Livewire::test(ListCsaShipments::class);
+        $cabangBefore = $page->instance()->getTable()->getFilter('target_sheet')->getOptions();
+        $brandBefore = $page->instance()->getTable()->getFilter('brand')->getOptions();
+
+        $this->assertSame('MEDAN (1)', $cabangBefore['MEDAN']);
+        $this->assertSame(['TECNO' => 'TECNO'], $brandBefore);
+
+        $this->shipment('SJ-2', 'MEDAN', ['brand' => 'ITEL', 'nama_ekspedisi' => 'EKSPEDISI BARU MEDAN']);
+        Expedition::create(['name' => 'KILAT EXPRESS', 'code' => 'KILAT', 'is_active' => true]);
+
+        $pageAfter = Livewire::test(ListCsaShipments::class);
+        $cabangAfter = $pageAfter->instance()->getTable()->getFilter('target_sheet')->getOptions();
+        $brandAfter = $pageAfter->instance()->getTable()->getFilter('brand')->getOptions();
+        $medanEkspedisi = ShipmentOptions::ekspedisi('MEDAN');
+
+        $this->assertSame('MEDAN (2)', $cabangAfter['MEDAN']);
+        $this->assertSame(['ITEL' => 'ITEL', 'TECNO' => 'TECNO'], $brandAfter);
+        $this->assertArrayHasKey('EKSPEDISI BARU MEDAN', $medanEkspedisi);
+        $this->assertArrayHasKey('KILAT EXPRESS', $medanEkspedisi);
+    }
+
+    public function test_concurrent_inline_and_modal_edits_on_different_columns_do_not_overwrite_each_other(): void
+    {
+        $shipment = $this->shipment('SJ-CONC', 'CIREBON', [
+            'nama_ekspedisi' => null,
+            'no_resi_awb' => null,
+            'biaya_kirim' => null,
+        ]);
+        Expedition::create(['name' => 'RAX', 'code' => 'RAX', 'is_active' => true]);
+
+        $adminA = $this->centralAdmin();
+        $adminB = $this->centralAdmin();
+
+        // Admin A & Admin B membuka tabel bersamaan
+        $this->actingAs($adminA);
+        $sessionA = Livewire::test(ListCsaShipments::class);
+
+        $this->actingAs($adminB);
+        $sessionB = Livewire::test(ListCsaShipments::class);
+
+        // Admin A mengisi ekspedisi & no resi lewat tabel inline
+        $this->actingAs($adminA);
+        $sessionA
+            ->call('updateTableColumnState', 'nama_ekspedisi', (string) $shipment->getKey(), 'RAX')
+            ->call('updateTableColumnState', 'no_resi_awb', (string) $shipment->getKey(), 'RESI-ADMIN-A');
+
+        // Di saat bersamaan Admin B mengisi biaya kirim & status pengiriman lewat tabel inline
+        $this->actingAs($adminB);
+        $sessionB
+            ->call('updateTableColumnState', 'biaya_kirim', (string) $shipment->getKey(), '75000')
+            ->call('updateTableColumnState', 'status_pengiriman', (string) $shipment->getKey(), 'ON DELIVERY');
+
+        $shipment->refresh();
+        $this->assertSame('RAX', $shipment->nama_ekspedisi);
+        $this->assertSame('RESI-ADMIN-A', $shipment->no_resi_awb);
+        $this->assertEquals(75000, (float) $shipment->biaya_kirim);
+        $this->assertSame('ON DELIVERY', $shipment->status_pengiriman);
+
+        // Admin A membuka modal "Lengkapi" (saat itu tanggal_diterima masih null), sementara Admin B
+        // mengisi tanggal_diterima = 2026-09-10 sebelum Admin A sempat menekan Simpan.
+        $this->actingAs($adminA);
+        $modalSessionA = Livewire::test(ListCsaShipments::class)
+            ->mountAction(TestAction::make('edit')->table($shipment));
+
+        $this->actingAs($adminB);
+        Livewire::test(ListCsaShipments::class)
+            ->call('updateTableColumnState', 'tanggal_diterima', (string) $shipment->getKey(), '2026-09-10');
+
+        // Admin A hanya mengubah qty_koli di modal lalu simpan -> tanggal_diterima milik Admin B tidak terhapus!
+        $this->actingAs($adminA);
+        $modalSessionA
+            ->setActionData(['qty_koli' => 4])
+            ->callMountedAction()
+            ->assertHasNoFormErrors();
+
+        $shipment->refresh();
+        $this->assertSame(4, $shipment->qty_koli);
+        $this->assertSame('2026-09-10', $shipment->tanggal_diterima?->toDateString());
+        $this->assertSame('RESI-ADMIN-A', $shipment->no_resi_awb);
+    }
+
+    public function test_reset_data_action_requires_super_admin_password_and_confirmation(): void
+    {
+        $import = $this->import();
+        $csa = $this->shipment('SJ-CSA', 'CIREBON', ['csa_import_id' => $import->id, 'source' => CsaShipment::SOURCE_CSA]);
+        $to = $this->shipment('2601000002-01', 'JAKARTA PIK', ['csa_import_id' => $import->id, 'source' => CsaShipment::SOURCE_TO]);
+        $sheet = $this->shipment('SJ-SHEET', 'BANDUNG', ['source' => CsaShipment::SOURCE_SPREADSHEET]);
+
+        // Admin cabang dan user non-super-admin tidak bisa melihat atau menjalankan Reset Data
+        $this->actingAs($this->branchAdmin('BANDUNG'));
+        Livewire::test(ListCsaShipments::class)->assertActionHidden('resetData');
+
+        $staffRole = Role::firstOrCreate(['name' => 'staff_pusat', 'guard_name' => 'web']);
+        $staffRole->givePermissionTo($this->permissions());
+        $staffUser = User::factory()->create(['password' => 'staffpass']);
+        $staffUser->assignRole($staffRole);
+        $this->actingAs($staffUser);
+        Livewire::test(ListCsaShipments::class)->assertActionHidden('resetData');
+
+        // Super admin login
+        $superAdmin = $this->centralAdmin();
+        $this->actingAs($superAdmin);
+
+        // Saat belum ada password reset di DB, super admin langsung menetapkannya tanpa password akun login
+        Livewire::test(ListCsaShipments::class)
+            ->assertActionVisible('resetData')
+            ->callAction('resetData', data: [
+                'new_password' => 'resetbaru1',
+                'new_password_confirmation' => 'resetbaru1',
+            ])
+            ->assertHasNoFormErrors()
+            ->assertNotified('Password Reset tersimpan');
+
+        $this->assertTrue(AppSetting::hasDataPengirimanResetPassword());
+        $this->assertSame(3, CsaShipment::count());
+
+        // Super admin dengan password salah atau konfirmasi salah ditolak dan data tetap utuh
+        Livewire::test(ListCsaShipments::class)
+            ->assertActionVisible('resetData')
+            ->callAction('resetData', data: [
+                'scope' => 'all',
+                'confirmation' => 'salah',
+                'password' => 'password-salah',
+            ])
+            ->assertHasFormErrors(['confirmation', 'password']);
+
+        $this->assertSame(3, CsaShipment::count());
+
+        // Reset khusus Realisasi TO: hanya baris TO yang terhapus
+        Livewire::test(ListCsaShipments::class)
+            ->callAction('resetData', data: [
+                'scope' => 'to',
+                'confirmation' => 'RESET',
+                'password' => 'resetbaru1',
+            ])
+            ->assertHasNoFormErrors()
+            ->assertNotified('Reset Data Pengiriman berhasil');
+
+        $this->assertModelMissing($to);
+        $this->assertModelExists($csa);
+        $this->assertModelExists($sheet);
+        $this->assertModelExists($import);
+
+        // Ubah password reset lewat toggle di modal resetData (tombol berubah jadi "Simpan Password", bukan "Ya, Reset Data")
+        $toggleModal = Livewire::test(ListCsaShipments::class)
+            ->mountAction('resetData')
+            ->set('mountedActions.0.data.manage_password', true);
+        $partialHtml = $toggleModal->effects['partials']['action-modals.0'] ?? '';
+        $this->assertStringContainsString('Simpan Password', $partialHtml);
+        $this->assertStringNotContainsString('Ya, Reset Data', $partialHtml);
+
+        Livewire::test(ListCsaShipments::class)
+            ->callAction('resetData', data: [
+                'manage_password' => true,
+                'current_reset_password' => 'password-salah',
+                'new_password' => 'resetbaru2',
+                'new_password_confirmation' => 'resetbaru2',
+            ])
+            ->assertHasFormErrors(['current_reset_password']);
+
+        Livewire::test(ListCsaShipments::class)
+            ->callAction('resetData', data: [
+                'manage_password' => true,
+                'current_reset_password' => 'resetbaru1',
+                'new_password' => 'resetbaru2',
+                'new_password_confirmation' => 'resetbaru2',
+            ])
+            ->assertHasNoFormErrors()
+            ->assertNotified('Password Reset tersimpan');
+
+        // Password lama tidak berlaku lagi
+        Livewire::test(ListCsaShipments::class)
+            ->callAction('resetData', data: [
+                'scope' => 'all',
+                'confirmation' => 'RESET',
+                'password' => 'resetbaru1',
+            ])
+            ->assertHasFormErrors(['password']);
+
+        // Reset semua beserta riwayat Upload CSA memakai password baru
+        Livewire::test(ListCsaShipments::class)
+            ->callAction('resetData', data: [
+                'scope' => 'all',
+                'reset_imports' => true,
+                'confirmation' => 'RESET',
+                'password' => 'resetbaru2',
+            ])
+            ->assertHasNoFormErrors()
+            ->assertNotified('Reset Data Pengiriman berhasil');
+
+        $this->assertSame(0, CsaShipment::count());
+        $this->assertSame(0, CsaImport::count());
+
+        // Jika permission ResetDataPengiriman dimatikan di Role & Permission, fitur Reset hilang untuk super_admin sekalipun
+        $superAdmin->roles()->first()?->revokePermissionTo('ResetDataPengiriman');
+        $superAdmin->forgetCachedPermissions();
+        Livewire::test(ListCsaShipments::class)->assertActionHidden('resetData');
     }
 
     private function import(): CsaImport

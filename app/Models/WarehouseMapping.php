@@ -26,4 +26,15 @@ class WarehouseMapping extends Model
     protected $casts = [
         'is_active' => 'boolean',
     ];
+
+    protected static function booted(): void
+    {
+        static::saved(function (): void {
+            CsaShipment::flushLookupCache();
+        });
+
+        static::deleted(function (): void {
+            CsaShipment::flushLookupCache();
+        });
+    }
 }
