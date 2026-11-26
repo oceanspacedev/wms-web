@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\CsaImports\Pages\ListCsaImports;
 use App\Filament\Resources\CsaShipments\Pages\ListCsaShipments;
 use App\Jobs\ProcessCsaImportJob;
 use App\Models\CsaImport;
@@ -77,6 +78,64 @@ class TransferOrderImportTest extends TestCase
         $this->assertSame('2026-10-20', $shipment->tanggal_diterima->format('Y-m-d'));
 
         $this->assertSame(0, CsaShipment::whereIn('no_sj', ['2610000219-02', '2610000220-01', '2610000221-01'])->count());
+    }
+
+    public function test_csa_imports_table_shows_sj_and_to_labels_under_file_name(): void
+    {
+        $admin = $this->centralAdmin();
+        Permission::firstOrCreate(['name' => 'ViewAny:CsaImport', 'guard_name' => 'web']);
+        $admin->roles()->first()?->givePermissionTo('ViewAny:CsaImport');
+
+        CsaImport::create([
+            'user_id' => $admin->id,
+            'file_name' => 'penjualan.xlsx',
+            'file_path' => '/tmp/penjualan.xlsx',
+            'report_type' => CsaImport::REPORT_SALES,
+            'status' => 'completed',
+        ]);
+
+        CsaImport::create([
+            'user_id' => $admin->id,
+            'file_name' => 'transfer.xlsx',
+            'file_path' => '/tmp/transfer.xlsx',
+            'report_type' => CsaImport::REPORT_TRANSFER,
+            'status' => 'completed',
+        ]);
+
+        $this->actingAs($admin);
+
+        Livewire::test(ListCsaImports::class)
+            ->assertSee('Penjualan CSA (SJ)')
+            ->assertSee('Realisasi TO');
+    }
+
+    public function test_import_selects_only_01_suffix_regardless_of_transaction_type(): void
+    {
+        $rows = [];
+        foreach ([
+            ['2601000001-01', 'RECEIVE'],
+            ['2601000002-01', 'ISSUE'],
+            ['2601000003-01', 'COMBINED'],
+            ['2601000001-02', 'ISSUE'],
+            ['2601000002-03', 'ISSUE'],
+            ['2601000003-04', 'COMBINED'],
+            ['2601000004-010', 'ISSUE'],
+            ['2601000005', 'ISSUE'],
+        ] as [$number, $type]) {
+            array_push($rows, ...$this->transfer($number, '[GMJKT   ]', 'GMPDG', $type, [
+                ['TECNO - HP 4G - CAMON 50', 10, 45990000],
+            ]));
+        }
+
+        $import = $this->runImport($this->report($rows));
+
+        $this->assertSame('completed', $import->status, (string) $import->error_message);
+        $this->assertSame(3, $import->total_new);
+        $this->assertSame([
+            '2601000001-01',
+            '2601000002-01',
+            '2601000003-01',
+        ], CsaShipment::orderBy('no_sj')->pluck('no_sj')->all());
     }
 
     public function test_transfer_orders_already_in_data_pengiriman_are_not_added_again(): void

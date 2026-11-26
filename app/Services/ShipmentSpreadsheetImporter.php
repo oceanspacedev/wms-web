@@ -65,7 +65,7 @@ class ShipmentSpreadsheetImporter
         $sheets = $this->reader->sheets($path);
         $this->unreadable = 0;
 
-        return DB::transaction(function () use ($path, $sheets, $sharedStrings, $replaceExisting): array {
+        $result = DB::transaction(function () use ($path, $sheets, $sharedStrings, $replaceExisting): array {
             $tabs = [];
             $skipped = [];
 
@@ -90,6 +90,10 @@ class ShipmentSpreadsheetImporter
 
             return ['tabs' => $tabs, 'skipped' => $skipped, 'unreadable' => $this->unreadable];
         });
+
+        CsaShipment::flushLookupCache();
+
+        return $result;
     }
 
     /**

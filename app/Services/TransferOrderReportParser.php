@@ -10,8 +10,9 @@ use Exception;
  * Laporan ERP "[XRSTOK23] Laporan Realisasi Transfer Antar Gudang".
  *
  * Seperti di spreadsheet lama, yang masuk Data Pengiriman hanya TO dari gudang pusat (GMJKT) ke depo GM:
- * satu baris per nomor ISSUE (mis. 2610000224-01) di cabang JAKARTA PIK dengan tujuan "DEPO <KOTA>".
- * Baris RECEIVE (-02) adalah penerimaan di depo, sedangkan baris tanpa nomor transaksi hanya rincian IMEI.
+ * satu baris per nomor berakhiran -01 di cabang JAKARTA PIK dengan tujuan "DEPO <KOTA>".
+ * Sesuai aturan tim gudang, seleksi memakai akhiran nomor, bukan jenis ISSUE/RECEIVE/COMBINED.
+ * Baris tanpa nomor transaksi hanya rincian IMEI.
  */
 class TransferOrderReportParser
 {
@@ -76,7 +77,7 @@ class TransferOrderReportParser
             $dari = $this->warehouseCode($this->cell($cells, $map, 'dari'));
             $ke = $this->warehouseCode($this->cell($cells, $map, 'ke'));
 
-            if (strtoupper($this->cell($cells, $map, 'jenis')) !== 'ISSUE'
+            if (! str_ends_with($noTo, '-01')
                 || $dari !== self::ORIGIN_WAREHOUSE
                 || $ke === self::ORIGIN_WAREHOUSE
                 || ! $depots->has($ke)) {
