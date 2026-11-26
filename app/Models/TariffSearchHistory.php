@@ -19,6 +19,7 @@ class TariffSearchHistory extends Model
         'user_id',
         'origin',
         'destination',
+        'district',
         'weight',
         'service',
         'total_results',

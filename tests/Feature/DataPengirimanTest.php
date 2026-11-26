@@ -935,4 +935,28 @@ class DataPengirimanTest extends TestCase
 
         return self::PERMISSIONS;
     }
+
+    public function test_tujuan_dealer_filter_scopes_data_pengiriman_and_supports_search(): void
+    {
+        $admin = $this->centralAdmin();
+        $this->actingAs($admin);
+
+        $atlantis = $this->shipment('SJ-ATL-01', 'CIREBON', [
+            'tujuan_dealer' => 'CV. ATLANTIS JAYA PRATAMA',
+        ]);
+        $other = $this->shipment('SJ-OTH-01', 'BANDUNG', [
+            'tujuan_dealer' => 'TOKO BINTANG SELULAR',
+        ]);
+
+        $this->assertSame(
+            ['CV. ATLANTIS JAYA PRATAMA' => 'CV. ATLANTIS JAYA PRATAMA'],
+            DataPengirimanTable::dealerOptions('atlantis'),
+        );
+
+        Livewire::test(ListCsaShipments::class)
+            ->assertCanSeeTableRecords([$atlantis, $other])
+            ->filterTable('tujuan_dealer', 'CV. ATLANTIS JAYA PRATAMA')
+            ->assertCanSeeTableRecords([$atlantis])
+            ->assertCanNotSeeTableRecords([$other]);
+    }
 }

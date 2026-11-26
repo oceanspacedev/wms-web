@@ -20,6 +20,7 @@ class CsaShipment extends Model
     /** Kolom yang memengaruhi dropdown filter / cache ringkasan tabel. */
     private const LOOKUP_FIELDS = [
         'target_sheet',
+        'tujuan_dealer',
         'brand',
         'badan_usaha',
         'nama_ekspedisi',
@@ -47,6 +48,9 @@ class CsaShipment extends Model
     /** Baris dari upload laporan realisasi TO (transfer gudang pusat ke depo). */
     public const SOURCE_TO = 'to';
 
+    /** Baris otomatis dari pencatatan Surat Jalan kurir sebelum data CSA di-upload. */
+    public const SOURCE_SURAT_JALAN = 'surat_jalan';
+
     /**
      * @var array<string, string>
      */
@@ -55,6 +59,7 @@ class CsaShipment extends Model
         self::SOURCE_TO => 'Upload TO',
         self::SOURCE_SPREADSHEET => 'Import spreadsheet',
         self::SOURCE_MANUAL => 'Input manual',
+        self::SOURCE_SURAT_JALAN => 'Surat Jalan',
     ];
 
     /**

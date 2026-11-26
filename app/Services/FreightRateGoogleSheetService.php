@@ -361,6 +361,87 @@ class FreightRateGoogleSheetService
     }
 
     /**
+     * Daftar kecamatan tujuan untuk asal + kota tertentu dari cache Google Sheets.
+     *
+     * @return array<string, string>
+     */
+    public function getDistrictOptions(?string $origin = null, ?string $destinationCity = null, ?string $search = null): array
+    {
+        if (! $this->isCacheAvailable() || empty($origin) || empty($destinationCity)) {
+            return [];
+        }
+
+        $db = $this->getDb();
+        $sql = 'SELECT DISTINCT destination_district
+                FROM rates
+                WHERE origin = :origin
+                  AND destination_city = :city
+                  AND destination_district IS NOT NULL
+                  AND destination_district != ""
+                  AND UPPER(TRIM(destination_district)) != UPPER(TRIM(destination_city))';
+        $params = [
+            ':origin' => strtoupper(trim($origin)),
+            ':city' => strtoupper(trim($destinationCity)),
+        ];
+
+        if (! empty($search)) {
+            $sql .= ' AND destination_district LIKE :search';
+            $params[':search'] = '%'.strtoupper(trim($search)).'%';
+        }
+
+        $sql .= ' ORDER BY destination_district ASC LIMIT 200';
+
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+        $districts = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $result = [];
+        foreach ($districts as $district) {
+            $result[$district] = $district;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Cari kecamatan langsung berdasarkan kota asal (ketika kota tujuan belum dipilih).
+     *
+     * @return array<string, string> key: "KOTA||KECAMATAN", label: "KECAMATAN (Kota: KOTA)"
+     */
+    public function searchDistrictsByOrigin(string $origin, string $search, int $limit = 40): array
+    {
+        if (! $this->isCacheAvailable() || empty(trim($origin)) || mb_strlen(trim($search)) < 2) {
+            return [];
+        }
+
+        $db = $this->getDb();
+        $stmt = $db->prepare(
+            'SELECT DISTINCT destination_city, destination_district
+             FROM rates
+             WHERE origin = :origin
+               AND destination_district IS NOT NULL
+               AND destination_district != ""
+               AND UPPER(TRIM(destination_district)) != UPPER(TRIM(destination_city))
+               AND destination_district LIKE :search
+             ORDER BY destination_district ASC, destination_city ASC
+             LIMIT :limit'
+        );
+        $stmt->bindValue(':origin', strtoupper(trim($origin)), PDO::PARAM_STR);
+        $stmt->bindValue(':search', '%'.strtoupper(trim($search)).'%', PDO::PARAM_STR);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $results = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $city = (string) $row['destination_city'];
+            $dist = (string) $row['destination_district'];
+            $results["{$city}||{$dist}"] = "{$dist} (Kota: {$city})";
+        }
+
+        return $results;
+    }
+
+    /**
      * Compare freight rates across all expeditions for given route & weight.
      *
      * @return array<int, array{
@@ -374,10 +455,12 @@ class FreightRateGoogleSheetService
      *     formula: string,
      *     lead_time: string,
      *     districts: array<int, string>,
+     *     match_scope: string,
+     *     matched_district: ?string,
      *     is_recommended: bool
      * }>
      */
-    public function compareRates(string $origin, string $destination, float $weight, ?string $service = null, int $limit = 5): array
+    public function compareRates(string $origin, string $destination, float $weight, ?string $service = null, int $limit = 5, ?string $district = null): array
     {
         if (! $this->isCacheAvailable()) {
             $this->syncFromSpreadsheet();
@@ -385,6 +468,7 @@ class FreightRateGoogleSheetService
 
         $origin = strtoupper(trim($origin));
         $dest = strtoupper(trim($destination));
+        $dist = ! empty(trim((string) $district)) ? strtoupper(trim((string) $district)) : null;
         $weight = max(0.1, $weight);
 
         $db = $this->getDb();
@@ -392,7 +476,7 @@ class FreightRateGoogleSheetService
         $sql = 'SELECT expedition, origin, province, destination_city, destination_district, min_kg, min_kg_val, is_flat, rate_per_kg, lead_time, service, notes
                 FROM rates 
                 WHERE (origin = :origin OR origin LIKE :origin_like)
-                  AND (destination_city = :dest OR destination_city LIKE :dest_like OR destination_district LIKE :dest_like)';
+                  AND (destination_city = :dest OR destination_city LIKE :dest_like OR destination_district LIKE :dest_like';
 
         $params = [
             ':origin' => $origin,
@@ -400,6 +484,13 @@ class FreightRateGoogleSheetService
             ':dest' => $dest,
             ':dest_like' => "%{$dest}%",
         ];
+
+        if ($dist !== null) {
+            $sql .= ' OR destination_district LIKE :dist_like';
+            $params[':dist_like'] = "%{$dist}%";
+        }
+
+        $sql .= ')';
 
         if (! empty($service) && strtoupper($service) !== 'ALL') {
             $sql .= ' AND service = :service';
@@ -414,7 +505,7 @@ class FreightRateGoogleSheetService
             return [];
         }
 
-        // Group by expedition + service to pick the best/lowest rate for each
+        // Group by expedition + service; when district is specified, prioritize exact/partial district match over city-level fallback
         $grouped = [];
         foreach ($rows as $r) {
             $exp = $r['expedition'];
@@ -432,11 +523,42 @@ class FreightRateGoogleSheetService
                 $formula = "{$chargeableWeight} kg × Rp ".number_format($rate, 0, ',', '.');
             }
 
+            $rowCity = strtoupper(trim((string) ($r['destination_city'] ?? '')));
+            $rowDistrict = strtoupper(trim((string) ($r['destination_district'] ?? '')));
+
+            $priority = 0;
+            $matchScope = 'city';
+            $matchedDistrict = null;
+
+            if ($dist !== null) {
+                if ($rowDistrict === $dist) {
+                    $priority = 3;
+                    $matchScope = 'district';
+                    $matchedDistrict = $r['destination_district'];
+                } elseif ($rowDistrict !== '' && str_contains($rowDistrict, $dist)) {
+                    $priority = 2;
+                    $matchScope = 'district';
+                    $matchedDistrict = $r['destination_district'];
+                } elseif ($rowDistrict === '' || $rowDistrict === $rowCity) {
+                    $priority = 1;
+                    $matchScope = 'city';
+                } else {
+                    // Ekspedisi punya kecamatan lain yang berbeda di kota yang sama — jangan dipakai untuk kecamatan yang diminta
+                    continue;
+                }
+            }
+
             $leadTime = trim($r['lead_time'] ?? '') ?: 'Reguler';
             $key = "{$exp}|{$srv}";
 
-            if (! isset($grouped[$key]) || $totalCost < $grouped[$key]['total_cost']) {
+            $isBetterPriority = ! isset($grouped[$key]) || $priority > $grouped[$key]['_priority'];
+            $isSamePriorityCheaper = isset($grouped[$key])
+                && $priority === $grouped[$key]['_priority']
+                && $totalCost < $grouped[$key]['total_cost'];
+
+            if ($isBetterPriority || $isSamePriorityCheaper) {
                 $grouped[$key] = [
+                    '_priority' => $priority,
                     'expedition' => $exp,
                     'service' => $srv,
                     'min_kg' => $r['min_kg'] ?: '1 KG',
@@ -448,17 +570,26 @@ class FreightRateGoogleSheetService
                     'lead_time' => $leadTime,
                     'notes' => $r['notes'] ?? '',
                     'districts' => ! empty($r['destination_district']) ? [$r['destination_district']] : [],
+                    'match_scope' => $matchScope,
+                    'matched_district' => $matchedDistrict,
                     'is_recommended' => false,
                 ];
-            } else {
+            } elseif ($priority === $grouped[$key]['_priority']) {
                 if (! empty($r['destination_district']) && ! in_array($r['destination_district'], $grouped[$key]['districts'])) {
                     $grouped[$key]['districts'][] = $r['destination_district'];
                 }
             }
         }
 
-        // Sort all by total_cost ASC, then rate_per_kg
-        $all = array_values($grouped);
+        if ($grouped === []) {
+            return [];
+        }
+
+        $all = array_map(function (array $item): array {
+            unset($item['_priority']);
+
+            return $item;
+        }, array_values($grouped));
         usort($all, function ($a, $b) {
             if ($a['total_cost'] == $b['total_cost']) {
                 return $a['rate_per_kg'] <=> $b['rate_per_kg'];

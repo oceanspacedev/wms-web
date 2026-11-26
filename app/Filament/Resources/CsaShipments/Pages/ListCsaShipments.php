@@ -7,6 +7,7 @@ use App\Jobs\ImportShipmentSpreadsheetJob;
 use App\Models\AppSetting;
 use App\Models\CsaShipment;
 use App\Services\DataPengirimanExporter;
+use App\Services\TrackingOrderShipmentSyncService;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Closure;
 use Filament\Actions\Action;
@@ -67,6 +68,7 @@ class ListCsaShipments extends ManageRecords
                         ->options([
                             'sj' => 'SJ (Penjualan)',
                             'to' => 'Realisasi TO',
+                            'surat_jalan' => 'Surat Jalan',
                             'manual' => 'Input Manual',
                         ]),
 
@@ -149,6 +151,26 @@ class ListCsaShipments extends ManageRecords
                     return $data;
                 }),
 
+            Action::make('syncTrackingOrders')
+                ->label('Sinkron Surat Jalan')
+                ->icon('heroicon-o-arrow-path')
+                ->color('gray')
+                ->visible(fn (): bool => (auth()->user()?->can('create', CsaShipment::class) ?? false)
+                    || (auth()->user()?->can('update', new CsaShipment) ?? false))
+                ->requiresConfirmation()
+                ->modalHeading('Sinkronisasi Data Surat Jalan')
+                ->modalDescription('Mengambil data dari menu Surat Jalan berdasarkan Nomor SJ. Jika No SJ belum ada di Data Pengiriman (data CSA belum di-upload), baris baru dibuat otomatis; jika sudah ada, kolom kosong seperti alamat, kota, nama ekspedisi (INTERNAL), dan tanggal diterima dilengkapi tanpa menimpa data CSA atau isian admin.')
+                ->modalSubmitActionLabel('Sinkron Sekarang')
+                ->action(function (): void {
+                    $stats = app(TrackingOrderShipmentSyncService::class)->syncAll(auth()->user()?->cabangScope());
+
+                    Notification::make()
+                        ->title('Sinkronisasi Surat Jalan selesai')
+                        ->body(number_format($stats['created'], 0, ',', '.').' data baru ditambahkan · '.number_format($stats['updated'], 0, ',', '.').' baris dilengkapi · '.number_format($stats['skipped'], 0, ',', '.').' sudah sesuai.')
+                        ->success()
+                        ->send();
+                }),
+
             Action::make('resetData')
                 ->label('Reset Data')
                 ->color('danger')
@@ -197,6 +219,7 @@ class ListCsaShipments extends ManageRecords
                                 'to' => 'Hanya Realisasi TO',
                                 'spreadsheet' => 'Hanya Hasil Import Spreadsheet',
                                 'csa' => 'Hanya Upload Penjualan CSA',
+                                'surat_jalan' => 'Hanya Hasil Sinkron Surat Jalan',
                             ])
                             ->default('all')
                             ->live()
@@ -342,7 +365,7 @@ class ListCsaShipments extends ManageRecords
                     $q->where('source', CsaShipment::SOURCE_TO)
                         ->orWhere('no_sj', 'like', CsaShipment::TO_NUMBER_LIKE);
                 });
-            } elseif (in_array($scope, [CsaShipment::SOURCE_SPREADSHEET, CsaShipment::SOURCE_CSA], true)) {
+            } elseif (in_array($scope, [CsaShipment::SOURCE_SPREADSHEET, CsaShipment::SOURCE_CSA, CsaShipment::SOURCE_SURAT_JALAN], true)) {
                 $query->where('source', $scope);
             }
 
@@ -532,6 +555,8 @@ class ListCsaShipments extends ManageRecords
             $query->transferOrders(false);
         } elseif ($jenis === 'to') {
             $query->transferOrders(true);
+        } elseif ($jenis === 'surat_jalan') {
+            $query->where('source', CsaShipment::SOURCE_SURAT_JALAN);
         } elseif ($jenis === 'manual') {
             $query->where('source', CsaShipment::SOURCE_MANUAL);
         }
@@ -567,6 +592,7 @@ class ListCsaShipments extends ManageRecords
         $jenisLabel = match ($data['jenis'] ?? null) {
             'sj' => 'SJ',
             'to' => 'Realisasi TO',
+            'surat_jalan' => 'Surat Jalan',
             'manual' => 'Manual',
             default => null,
         };

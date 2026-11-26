@@ -58,6 +58,14 @@ class DataPengirimanTable
                     ->searchable()
                     ->visible(fn (): bool => blank(auth()->user()?->cabangScope())),
 
+                SelectFilter::make('tujuan_dealer')
+                    ->label('Nama Dealer')
+                    ->placeholder('Semua dealer')
+                    ->searchable()
+                    ->options(fn (): array => static::dealerOptions())
+                    ->getSearchResultsUsing(fn (?string $search): array => static::dealerOptions($search))
+                    ->getOptionLabelUsing(fn ($value): ?string => filled($value) ? (string) $value : null),
+
                 SelectFilter::make('kelengkapan')
                     ->label('Kelengkapan Data')
                     ->options([
@@ -452,5 +460,42 @@ class DataPengirimanTable
     private static function canEdit(CsaShipment $record): bool
     {
         return (bool) auth()->user()?->can('update', $record);
+    }
+
+    /**
+     * Daftar nama dealer/tujuan teratas (atau sesuai kata kunci) agar filter ribuan dealer tetap ringan.
+     *
+     * @return array<string, string>
+     */
+    public static function dealerOptions(?string $search = null): array
+    {
+        $needle = trim((string) $search);
+        $cabang = auth()->user()?->cabangScope();
+
+        if ($needle === '') {
+            return CsaShipment::cached(
+                'dealer_top_options:'.md5((string) $cabang),
+                fn (): array => CsaShipment::query()
+                    ->visibleTo(auth()->user())
+                    ->whereNotNull('tujuan_dealer')
+                    ->where('tujuan_dealer', '!=', '')
+                    ->distinct()
+                    ->orderBy('tujuan_dealer')
+                    ->limit(50)
+                    ->pluck('tujuan_dealer', 'tujuan_dealer')
+                    ->all(),
+            );
+        }
+
+        return CsaShipment::query()
+            ->visibleTo(auth()->user())
+            ->whereNotNull('tujuan_dealer')
+            ->where('tujuan_dealer', '!=', '')
+            ->where('tujuan_dealer', 'like', '%'.$needle.'%')
+            ->distinct()
+            ->orderBy('tujuan_dealer')
+            ->limit(50)
+            ->pluck('tujuan_dealer', 'tujuan_dealer')
+            ->all();
     }
 }

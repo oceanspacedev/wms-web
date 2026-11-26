@@ -248,7 +248,7 @@ class DashboardMonitoringTest extends TestCase
             ->assertSee('Surat Jalan Hari Ini')
             ->assertSee('1 terkirim · 1 di jalan')
             ->assertSee('Data Pengiriman')
-            ->assertSee('1 belum ada resi')
+            ->assertSee('3 belum ada resi')
             ->assertSee('Tarif Kontrak')
             ->assertSee('1 ekspedisi aktif')
             ->assertSee('User Aktif')
