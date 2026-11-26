@@ -61,6 +61,17 @@ class CsaImport extends Model
         'period_end' => 'date',
     ];
 
+    protected static function booted(): void
+    {
+        static::saved(function (): void {
+            CsaShipment::flushLookupCache();
+        });
+
+        static::deleted(function (): void {
+            CsaShipment::flushLookupCache();
+        });
+    }
+
     /**
      * @return BelongsTo<User, $this>
      */

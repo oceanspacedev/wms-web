@@ -257,6 +257,7 @@ return [
         'view_log_viewer',
         'view_api_docs',
         'impersonate_user',
+        'reset_data_pengiriman',
     ],
 
     /*

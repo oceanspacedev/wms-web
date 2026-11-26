@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Filament\Resources\CsaShipments\Pages\ListCsaShipments;
 use App\Models\CsaShipment;
 use App\Models\Expedition;
 use App\Models\WarehouseMapping;
@@ -12,6 +13,9 @@ use App\Models\WarehouseMapping;
  */
 final class ShipmentOptions
 {
+    /** Tab dengan list panjang nama driver/daerah spesifik yang tidak perlu membebani dropdown umum cabang lain. */
+    private const EXCLUDED_FALLBACK_TABS = ['PALU', 'MAKASSAR'];
+
     /**
      * Tab cabang: urutan sama dengan spreadsheet, lalu cabang lain yang sudah punya data atau pemetaan gudang.
      *
@@ -19,7 +23,7 @@ final class ShipmentOptions
      */
     public static function tabs(): array
     {
-        return once(function (): array {
+        return CsaShipment::cached('shipment_options:tabs', function (): array {
             $configured = array_map('trim', (array) config('data_pengiriman.tabs', []));
 
             $others = CsaShipment::query()->distinct()->pluck('target_sheet')
@@ -73,7 +77,22 @@ final class ShipmentOptions
      */
     public static function badanUsaha(?string $cabang = null, ?string $current = null): array
     {
-        return self::forField('badan_usaha', $cabang, $current);
+        $rawOptions = self::forField('badan_usaha', $cabang, null);
+        $options = [];
+
+        foreach ($rawOptions as $value) {
+            $canonical = ListCsaShipments::canonicalBadanUsaha((string) $value);
+            if ($canonical !== '') {
+                $options[$canonical] = $canonical;
+            }
+        }
+
+        if (filled($current)) {
+            $canonicalCurrent = ListCsaShipments::canonicalBadanUsaha($current) ?: trim($current);
+            $options[$canonicalCurrent] = $canonicalCurrent;
+        }
+
+        return $options;
     }
 
     /**
@@ -100,39 +119,80 @@ final class ShipmentOptions
      */
     private static function forField(string $field, ?string $cabang, ?string $current, bool $withMasterEkspedisi = false): array
     {
-        $options = once(function () use ($field, $cabang, $withMasterEkspedisi): array {
-            $perTab = (array) config('data_pengiriman.options', []);
-            $tab = self::configKey($cabang, array_keys($perTab));
+        $perTab = (array) config('data_pengiriman.options', []);
+        $tab = self::configKey($cabang, array_keys($perTab));
 
-            if ($tab !== null && ! empty($perTab[$tab][$field])) {
-                return self::clean($perTab[$tab][$field]);
-            }
+        if ($tab !== null && ! empty($perTab[$tab][$field])) {
+            $options = self::clean($perTab[$tab][$field]);
+        } else {
+            $options = CsaShipment::cached(
+                'shipment_options:base:'.$field.':'.($withMasterEkspedisi ? '1' : '0'),
+                function () use ($perTab, $field, $withMasterEkspedisi): array {
+                    $values = collect($perTab)
+                        ->except(self::EXCLUDED_FALLBACK_TABS)
+                        ->pluck($field)
+                        ->filter()
+                        ->flatten()
+                        ->all();
 
-            $values = collect($perTab)->pluck($field)->filter()->flatten()->all();
+                    if ($withMasterEkspedisi) {
+                        $masterExpeditions = Expedition::query()
+                            ->where('is_active', true)
+                            ->orderBy('name')
+                            ->pluck('name')
+                            ->all();
+                        $values = [...$values, ...$masterExpeditions];
+                    }
 
-            if ($withMasterEkspedisi) {
-                $values = [...$values, ...Expedition::query()->where('is_active', true)->orderBy('name')->pluck('name')->all()];
-            }
+                    return self::clean($values);
+                },
+            );
 
             if (filled($cabang)) {
-                $values = [...$values, ...CsaShipment::query()
-                    ->where('target_sheet', $cabang)
-                    ->whereNotNull($field)
-                    ->where($field, '!=', '')
-                    ->distinct()
-                    ->limit(200)
-                    ->pluck($field)
-                    ->all()];
+                $byCabang = self::usedValuesByCabang($field);
+                $branchValues = $byCabang[mb_strtoupper(trim($cabang))] ?? [];
+                if ($branchValues !== []) {
+                    $options = self::clean([...$options, ...$branchValues]);
+                }
             }
-
-            return self::clean($values);
-        });
+        }
 
         if (filled($current) && ! array_key_exists($current, $options)) {
             $options[$current] = $current;
         }
 
         return $options;
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    private static function usedValuesByCabang(string $field): array
+    {
+        return CsaShipment::cached('shipment_options:used_by_cabang:'.$field, function () use ($field): array {
+            $grouped = [];
+
+            CsaShipment::query()
+                ->toBase()
+                ->select(['target_sheet', $field])
+                ->whereNotNull('target_sheet')
+                ->whereNotNull($field)
+                ->where($field, '!=', '')
+                ->distinct()
+                ->get()
+                ->each(function (object $row) use ($field, &$grouped): void {
+                    $cabangKey = mb_strtoupper(trim((string) $row->target_sheet));
+                    if ($cabangKey === '') {
+                        return;
+                    }
+
+                    if (count($grouped[$cabangKey] ?? []) < 200) {
+                        $grouped[$cabangKey][] = (string) $row->{$field};
+                    }
+                });
+
+            return $grouped;
+        });
     }
 
     /**
@@ -160,10 +220,17 @@ final class ShipmentOptions
     private static function clean(array $values): array
     {
         $clean = [];
+        $seen = [];
 
         foreach ($values as $value) {
-            $value = trim((string) $value);
-            if ($value !== '' && ! array_key_exists(mb_strtoupper($value), array_change_key_case($clean, CASE_UPPER))) {
+            $value = trim(str_replace('"&"', '', (string) $value));
+            if ($value === '') {
+                continue;
+            }
+
+            $upper = mb_strtoupper($value);
+            if (! isset($seen[$upper])) {
+                $seen[$upper] = true;
                 $clean[$value] = $value;
             }
         }

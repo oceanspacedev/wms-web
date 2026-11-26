@@ -3,14 +3,37 @@
 namespace App\Models;
 
 use Carbon\CarbonInterface;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Once;
 
 class CsaShipment extends Model
 {
     use HasFactory;
+
+    private const CACHE_VERSION_KEY = 'csa_shipments:lookup_version';
+
+    /** Kolom yang memengaruhi dropdown filter / cache ringkasan tabel. */
+    private const LOOKUP_FIELDS = [
+        'target_sheet',
+        'brand',
+        'badan_usaha',
+        'nama_ekspedisi',
+        'ketentuan_biaya_kirim',
+        'status_pembayaran',
+        'tanggal_kirim',
+        'source',
+        'csa_import_id',
+    ];
+
+    public static bool $suppressCacheFlush = false;
+
+    /** @var array<string, mixed> */
+    private static array $requestMemo = [];
 
     /** Baris dari upload laporan CSA. */
     public const SOURCE_CSA = 'csa';
@@ -125,6 +148,77 @@ class CsaShipment extends Model
                 }
             }
         });
+
+        static::saved(function (CsaShipment $shipment): void {
+            if (self::$suppressCacheFlush) {
+                return;
+            }
+
+            if ($shipment->wasRecentlyCreated || $shipment->wasChanged(self::LOOKUP_FIELDS)) {
+                self::flushLookupCache();
+            }
+        });
+
+        static::deleted(function (): void {
+            if (! self::$suppressCacheFlush) {
+                self::flushLookupCache();
+            }
+        });
+    }
+
+    /**
+     * Cache query lookup ringan (dropdown filter, daftar cabang, upload terbaru) dengan invalidasi versi otomatis.
+     *
+     * @template TValue
+     *
+     * @param  Closure(): TValue  $resolver
+     * @return TValue
+     */
+    public static function cached(string $key, Closure $resolver): mixed
+    {
+        $version = once(fn (): int => (int) Cache::get(self::CACHE_VERSION_KEY, 1));
+        $fullKey = "csa_shipments:v{$version}:{$key}";
+
+        if (array_key_exists($fullKey, self::$requestMemo)) {
+            return self::$requestMemo[$fullKey];
+        }
+
+        if (count(self::$requestMemo) > 200) {
+            self::$requestMemo = [];
+        }
+
+        return self::$requestMemo[$fullKey] = Cache::remember($fullKey, now()->addMinutes(15), $resolver);
+    }
+
+    public static function flushLookupCache(): void
+    {
+        self::$requestMemo = [];
+        Cache::add(self::CACHE_VERSION_KEY, 1);
+        Cache::increment(self::CACHE_VERSION_KEY);
+        Once::flush();
+    }
+
+    /**
+     * Tahan invalidasi cache selama proses import massal, lalu segarkan sekali di akhir.
+     *
+     * @template TReturn
+     *
+     * @param  Closure(): TReturn  $callback
+     * @return TReturn
+     */
+    public static function withoutLookupCacheFlush(Closure $callback): mixed
+    {
+        $previous = self::$suppressCacheFlush;
+        self::$suppressCacheFlush = true;
+
+        try {
+            return $callback();
+        } finally {
+            self::$suppressCacheFlush = $previous;
+            if (! $previous) {
+                self::flushLookupCache();
+            }
+        }
     }
 
     /**
