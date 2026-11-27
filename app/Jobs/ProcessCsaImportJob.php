@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\CsaImport;
 use App\Models\CsaShipment;
 use App\Services\CsaExcelParserService;
+use App\Services\TrackingOrderShipmentSyncService;
 use Exception;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -111,15 +112,25 @@ class ProcessCsaImportJob implements ShouldQueue
         $totalNew = 0;
         $totalUpdated = 0;
         $totalSkipped = 0;
+        $syncService = app(TrackingOrderShipmentSyncService::class);
 
         foreach (array_chunk($items, 500) as $chunk) {
             $sjNumbers = array_column($chunk, 'no_sj');
 
-            $existing = CsaShipment::query()
-                ->where('source', CsaShipment::SOURCE_CSA)
+            $existing = collect();
+            $suratJalanRows = collect();
+
+            CsaShipment::query()
+                ->whereIn('source', [CsaShipment::SOURCE_CSA, CsaShipment::SOURCE_SURAT_JALAN])
                 ->whereIn('no_sj', $sjNumbers)
                 ->get()
-                ->keyBy(fn (CsaShipment $shipment): string => $this->matchKey($shipment->no_sj, $shipment->badan_usaha));
+                ->each(function (CsaShipment $shipment) use ($existing, $suratJalanRows): void {
+                    if ($shipment->source === CsaShipment::SOURCE_CSA) {
+                        $existing->put($this->matchKey($shipment->no_sj, $shipment->badan_usaha), $shipment);
+                    } else {
+                        $suratJalanRows->put(trim((string) $shipment->no_sj), $shipment);
+                    }
+                });
 
             // Total baris spreadsheet per cabang + No SJ
             $spreadsheetTotals = CsaShipment::query()
@@ -143,6 +154,17 @@ class ProcessCsaImportJob implements ShouldQueue
                     continue;
                 }
 
+                // Jika Surat Jalan sudah lebih dulu masuk sebelum CSA di-upload, gabungkan (promosikan ke CSA) tanpa dobel baris
+                $fromSuratJalan = $suratJalanRows->pull(trim((string) $item['no_sj']));
+                if ($fromSuratJalan instanceof CsaShipment) {
+                    $fromSuratJalan->source = CsaShipment::SOURCE_CSA;
+                    $fromSuratJalan->badan_usaha = $item['badan_usaha'];
+                    $this->refreshFromCsa($fromSuratJalan, $item);
+                    $totalUpdated++;
+
+                    continue;
+                }
+
                 // Sudah ada di spreadsheet dengan No SJ & total sama: tidak ditambah, data spreadsheet tidak ditimpa.
                 // Total beda tetap masuk sebagai baris baru dengan No SJ yang sama.
                 $totals = $spreadsheetTotals->get($this->spreadsheetKey($item['target_sheet'], $item['no_sj']), []);
@@ -160,6 +182,8 @@ class ProcessCsaImportJob implements ShouldQueue
             if ($records !== []) {
                 DB::table('csa_shipments')->insert($records);
             }
+
+            $syncService->fillEmptyFromTrackingOrders($sjNumbers);
         }
 
         return [$totalNew, $totalUpdated, $totalSkipped];

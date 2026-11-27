@@ -119,7 +119,7 @@
                             <tbody class="divide-y divide-gray-200 dark:divide-white/5">
                                 @foreach($histories as $item)
                                     <tr 
-                                        x-show="!search || '{{ strtolower($item->origin . ' ' . $item->destination . ' ' . $item->cheapest_expedition . ' ' . $item->service . ' ' . $item->store_name) }}'.includes(search.toLowerCase())"
+                                        x-show="!search || '{{ strtolower($item->origin . ' ' . $item->destination . ' ' . $item->district . ' ' . $item->cheapest_expedition . ' ' . $item->service . ' ' . $item->store_name) }}'.includes(search.toLowerCase())"
                                         class="transition duration-75 hover:bg-gray-50/50 dark:hover:bg-white/5"
                                     >
                                         {{-- Waktu --}}
@@ -135,6 +135,11 @@
                                             <div class="font-medium text-gray-950 dark:text-white">
                                                 {{ $item->origin }} &rarr; {{ $item->destination }}
                                             </div>
+                                            @if(!empty($item->district))
+                                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                    Kec. {{ $item->district }}
+                                                </div>
+                                            @endif
                                         </td>
 
                                         {{-- Berat & Nilai --}}
@@ -256,7 +261,7 @@
                             <div class="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 flex-wrap">
                                 <span class="font-medium text-gray-950 dark:text-white">{{ $searchedOrigin }}</span>
                                 <span class="text-gray-400 font-semibold">&rarr;</span>
-                                <span class="font-medium text-gray-950 dark:text-white">{{ $searchedDestination }}</span>
+                                <span class="font-medium text-gray-950 dark:text-white">{{ $searchedDestination }}@if(!empty($searchedDistrict)), Kec. {{ $searchedDistrict }}@endif</span>
                                 <span class="text-gray-500 dark:text-gray-400">({{ $searchedWeight }} KG)</span>
                                 @if(!empty($searchedTotalAmount))
                                     <span class="text-gray-500 dark:text-gray-400">&bull; Nilai: Rp {{ number_format($searchedTotalAmount, 0, ',', '.') }}</span>
@@ -327,7 +332,7 @@
                                     >
                                         {{-- Ekspedisi --}}
                                         <td class="px-4 py-4 ps-4 sm:ps-6 text-sm text-gray-950 dark:text-white align-middle whitespace-nowrap">
-                                            <div class="flex items-center gap-1.5">
+                                            <div class="flex items-center gap-1.5 flex-wrap">
                                                 <span class="font-medium text-gray-950 dark:text-white">{{ $rate['expedition'] }}</span>
                                                 @if($index === 0)
                                                     <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
@@ -338,6 +343,17 @@
                                                     <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-400/20">
                                                         {{ $rate['pricing_badge'] ?? 'Flat' }}
                                                     </span>
+                                                @endif
+                                                @if(!empty($searchedDistrict))
+                                                    @if(($rate['match_scope'] ?? 'city') === 'district')
+                                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                                                            Kec. {{ $rate['matched_district'] ?? $searchedDistrict }}
+                                                        </span>
+                                                    @else
+                                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300">
+                                                            Tarif Kota
+                                                        </span>
+                                                    @endif
                                                 @endif
                                             </div>
                                         </td>
@@ -409,7 +425,7 @@
                 <div class="fi-section rounded-xl bg-white shadow-xs ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 overflow-hidden p-8 text-center space-y-3">
                     <div class="space-y-1">
                         <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
-                            Tarif Rute {{ $searchedOrigin }} &rarr; {{ $searchedDestination }} Belum Tersedia
+                            Tarif Rute {{ $searchedOrigin }} &rarr; {{ $searchedDestination }}@if(!empty($searchedDistrict)), Kec. {{ $searchedDistrict }}@endif Belum Tersedia
                         </h4>
                         <p class="text-xs text-gray-500 dark:text-gray-400 max-w-md mx-auto">
                             Belum ada data tarif pada Google Spreadsheet untuk rute pengiriman ini.

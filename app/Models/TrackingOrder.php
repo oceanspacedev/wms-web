@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\HasOwner;
+use App\Services\TrackingOrderShipmentSyncService;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -44,6 +45,11 @@ class TrackingOrder extends Model
             if ($order->depo_id === null && $order->user_id !== null) {
                 $order->depo_id = User::query()->whereKey($order->user_id)->value('depo_id');
             }
+        });
+
+        // Sinkronkan otomatis ke Data Pengiriman berdasarkan Nomor SJ
+        static::saved(function (TrackingOrder $order): void {
+            app(TrackingOrderShipmentSyncService::class)->syncOrder($order);
         });
     }
 

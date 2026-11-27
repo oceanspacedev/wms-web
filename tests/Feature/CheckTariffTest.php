@@ -412,6 +412,98 @@ class CheckTariffTest extends TestCase
         $this->assertTrue($rates[2]['is_flat']);
     }
 
+    public function test_check_tariff_supports_district_lookup_with_city_level_fallback(): void
+    {
+        $sentral = Expedition::create(['name' => 'SENTRAL CARGO', 'code' => 'SNT', 'is_active' => true]);
+        $express21 = Expedition::create(['name' => '21 EXPRES', 'code' => '21EXP', 'is_active' => true]);
+
+        // SENTRAL CARGO punya tarif khusus per kecamatan: ANDIR lebih murah (3.000) daripada SOREANG (5.500)
+        ExpeditionRateCard::create([
+            'expedition_id' => $sentral->id,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'BANDUNG',
+            'destination_district' => 'ANDIR',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 3000,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '2',
+            'is_active' => true,
+        ]);
+
+        ExpeditionRateCard::create([
+            'expedition_id' => $sentral->id,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'BANDUNG',
+            'destination_district' => 'SOREANG',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 5500,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '2-3',
+            'is_active' => true,
+        ]);
+
+        // 21 EXPRES hanya punya tarif level kota BANDUNG (tanpa rincian kecamatan)
+        ExpeditionRateCard::create([
+            'expedition_id' => $express21->id,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'BANDUNG',
+            'destination_district' => null,
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 4500,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1-2',
+            'is_active' => true,
+        ]);
+
+        $component = Livewire::actingAs($this->user)
+            ->test(CheckTariff::class)
+            ->set('data.origin', 'JAKARTA')
+            ->set('data.destination', 'BANDUNG')
+            ->set('data.district', 'SOREANG')
+            ->set('data.weight', 10)
+            ->set('data.service', 'DARAT')
+            ->call('checkTariff')
+            ->assertSet('hasSearched', true)
+            ->assertSet('searchedDistrict', 'SOREANG')
+            ->assertSee('Kec. SOREANG')
+            ->assertSee('Tarif Kota');
+
+        $rates = $component->get('rates');
+        $this->assertCount(2, $rates);
+        $this->assertSame('21 EXPRES', $rates[0]['expedition']);
+        $this->assertSame('city', $rates[0]['match_scope']);
+        $this->assertEquals(45000.0, $rates[0]['total_cost']);
+
+        // SENTRAL harus mengambil tarif SOREANG (55.000), bukan ANDIR (30.000)
+        $this->assertSame('SENTRAL CARGO', $rates[1]['expedition']);
+        $this->assertSame('district', $rates[1]['match_scope']);
+        $this->assertSame('SOREANG', $rates[1]['matched_district']);
+        $this->assertEquals(55000.0, $rates[1]['total_cost']);
+
+        $this->assertDatabaseHas('tariff_search_histories', [
+            'origin' => 'JAKARTA',
+            'destination' => 'BANDUNG',
+            'district' => 'SOREANG',
+            'weight' => 10,
+        ]);
+
+        // Bisa cari kecamatan langsung tanpa memilih kota tujuan lebih dulu
+        $directSelection = Livewire::actingAs($this->user)
+            ->test(CheckTariff::class)
+            ->set('data.origin', 'JAKARTA');
+
+        $districtSearchResults = $directSelection->instance()->searchDistrictsForOrigin('JAKARTA', 'sore');
+        $this->assertSame(['BANDUNG||SOREANG' => 'SOREANG (Kota: BANDUNG)'], $districtSearchResults);
+
+        $directSelection
+            ->set('data.district', 'BANDUNG||SOREANG')
+            ->assertSet('data.destination', 'BANDUNG')
+            ->assertSet('data.district', 'SOREANG');
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */
