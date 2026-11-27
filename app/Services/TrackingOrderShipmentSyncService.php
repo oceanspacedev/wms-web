@@ -44,6 +44,7 @@ class TrackingOrderShipmentSyncService
                 'qty_unit' => 0,
                 'qty_koli' => 0,
                 'berat' => 0,
+                'status_pengiriman' => $payload['status_pengiriman'],
                 'tanggal_diterima' => $payload['tanggal_diterima'],
                 'is_synced' => false,
                 'already_in_sheet' => false,
@@ -134,6 +135,7 @@ class TrackingOrderShipmentSyncService
                                 'qty_unit' => 0,
                                 'qty_koli' => 0,
                                 'berat' => 0,
+                                'status_pengiriman' => $payload['status_pengiriman'],
                                 'tanggal_diterima' => $payload['tanggal_diterima'],
                                 'is_synced' => false,
                                 'already_in_sheet' => false,
@@ -219,6 +221,7 @@ class TrackingOrderShipmentSyncService
      *     nama_ekspedisi: string,
      *     reff_note: ?string,
      *     total_nominal_sj: float,
+     *     status_pengiriman: ?string,
      *     tanggal_diterima: ?string
      * }
      */
@@ -239,6 +242,7 @@ class TrackingOrderShipmentSyncService
         $namaKota = $this->extractCity($order->address, $order->alamat_dealer);
 
         $isDelivered = filled($order->nama_penerima) || filled($order->foto_penerima);
+        $statusPengiriman = $isDelivered ? 'Sudah Diterima' : null;
         $tanggalDiterima = $isDelivered
             ? ($order->tanggal_pengiriman ?? $order->created_at)?->toDateString()
             : null;
@@ -257,6 +261,7 @@ class TrackingOrderShipmentSyncService
             'nama_ekspedisi' => 'INTERNAL',
             'reff_note' => filled($order->notes) ? trim((string) $order->notes) : null,
             'total_nominal_sj' => max(0.0, (float) ($order->jumlah_value_nota ?? 0)),
+            'status_pengiriman' => $statusPengiriman,
             'tanggal_diterima' => $tanggalDiterima,
         ];
     }
@@ -266,7 +271,7 @@ class TrackingOrderShipmentSyncService
      */
     private function fillShipmentFromPayload(CsaShipment $shipment, array $payload): bool
     {
-        foreach (['tujuan_dealer', 'alamat_kirim', 'nama_kota', 'nama_ekspedisi', 'reff_note'] as $textColumn) {
+        foreach (['tujuan_dealer', 'alamat_kirim', 'nama_kota', 'nama_ekspedisi', 'reff_note', 'status_pengiriman'] as $textColumn) {
             if (blank($shipment->{$textColumn}) && filled($payload[$textColumn] ?? null)) {
                 $shipment->{$textColumn} = $payload[$textColumn];
             }

@@ -11,6 +11,7 @@ use App\Services\TrackingOrderShipmentSyncService;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Closure;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
@@ -19,6 +20,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ManageRecords;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Support\Enums\IconPosition;
 use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
@@ -49,92 +51,284 @@ class ListCsaShipments extends ManageRecords
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('export')
-                ->label('Export Excel')
+            ActionGroup::make([
+                Action::make('export')
+                    ->label('Export Excel')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('gray')
+                    ->modalHeading('Export Data Pengiriman')
+                    ->modalDescription('Pilih filter data yang ingin di-export. Kosongkan pilihan untuk mengekspor seluruh data sesuai tampilan tabel.')
+                    ->modalWidth(Width::Medium)
+                    ->modalSubmitActionLabel('Export Excel')
+                    ->fillForm(fn (): array => [
+                        'jenis' => $this->tableFilters['jenis']['value'] ?? null,
+                        'badan_usaha' => $this->tableFilters['badan_usaha']['value'] ?? null,
+                        'bulan' => null,
+                    ])
+                    ->schema([
+                        Select::make('jenis')
+                            ->label('Jenis Data')
+                            ->placeholder('Semua (SJ & Realisasi TO)')
+                            ->options([
+                                'sj' => 'SJ (Penjualan)',
+                                'to' => 'Realisasi TO',
+                                'surat_jalan' => 'Surat Jalan',
+                                'manual' => 'Input Manual',
+                            ]),
+
+                        Select::make('badan_usaha')
+                            ->label('Badan Usaha')
+                            ->placeholder('Semua badan usaha')
+                            ->options(fn (): array => self::badanUsahaOptions())
+                            ->searchable(),
+
+                        Select::make('bulan')
+                            ->label('Bulan Pengiriman')
+                            ->placeholder('Semua bulan')
+                            ->options(fn (): array => $this->monthOptions())
+                            ->searchable(),
+                    ])
+                    ->action(function (array $data): StreamedResponse {
+                        $query = $this->applyExportFilters(clone $this->getFilteredSortedTableQuery(), $data);
+
+                        return app(DataPengirimanExporter::class)->download(
+                            $query,
+                            $this->exportFileName($data),
+                        );
+                    }),
+
+                Action::make('importSpreadsheet')
+                    ->label('Import Spreadsheet')
+                    ->icon('heroicon-o-arrow-up-tray')
+                    ->color('gray')
+                    // Mengisi semua cabang sekaligus, jadi hanya untuk admin pusat
+                    ->visible(fn (): bool => blank(auth()->user()?->cabangScope())
+                        && (auth()->user()?->can('create', CsaShipment::class) ?? false))
+                    ->modalHeading('Import Spreadsheet Update Pengiriman')
+                    ->modalDescription('Download Google Sheet lewat File → Download → Microsoft Excel (.xlsx), lalu upload di sini. Setiap tab menjadi cabang dengan kolom yang sama seperti tabel ini.')
+                    ->modalWidth(Width::Large)
+                    ->modalSubmitActionLabel('Import')
+                    ->schema([
+                        FileUpload::make('file')
+                            ->label('File spreadsheet (.xlsx)')
+                            ->disk('local')
+                            ->directory('pengiriman-imports')
+                            ->acceptedFileTypes([
+                                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                'application/octet-stream',
+                                'application/zip',
+                            ])
+                            ->maxSize(102400)
+                            ->storeFileNamesIn('file_name')
+                            ->required(),
+                        Toggle::make('replace_existing')
+                            ->label('Ganti data hasil import spreadsheet sebelumnya')
+                            ->helperText('Untuk cabang yang ada di file ini, supaya import ulang tidak dobel. Data dari upload CSA dan input manual tidak ikut terhapus.')
+                            ->default(true),
+                    ])
+                    ->action(function (array $data): void {
+                        ImportShipmentSpreadsheetJob::dispatch(
+                            $data['file'],
+                            $data['file_name'] ?? basename($data['file']),
+                            (bool) ($data['replace_existing'] ?? true),
+                            auth()->id(),
+                        );
+
+                        Notification::make()
+                            ->title('Import spreadsheet sedang diproses')
+                            ->body('Berjalan di belakang layar ±1–3 menit. Hasilnya muncul di notifikasi lonceng di kanan atas.')
+                            ->success()
+                            ->send();
+                    }),
+
+                Action::make('syncTrackingOrders')
+                    ->label('Sinkron Surat Jalan')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('gray')
+                    ->visible(fn (): bool => (auth()->user()?->can('create', CsaShipment::class) ?? false)
+                        || (auth()->user()?->can('update', new CsaShipment) ?? false))
+                    ->requiresConfirmation()
+                    ->modalHeading('Sinkronisasi Data Surat Jalan')
+                    ->modalDescription('Mengambil data dari menu Surat Jalan berdasarkan Nomor SJ. Jika No SJ belum ada di Data Pengiriman (data CSA belum di-upload), baris baru dibuat otomatis; jika sudah ada, kolom kosong seperti alamat, kota, nama ekspedisi (INTERNAL), status pengiriman (Sudah Diterima), dan tanggal diterima dilengkapi tanpa menimpa data CSA atau isian admin.')
+                    ->modalSubmitActionLabel('Sinkron Sekarang')
+                    ->action(function (): void {
+                        $stats = app(TrackingOrderShipmentSyncService::class)->syncAll(auth()->user()?->cabangScope());
+
+                        Notification::make()
+                            ->title('Sinkronisasi Surat Jalan selesai')
+                            ->body(number_format($stats['created'], 0, ',', '.').' data baru ditambahkan · '.number_format($stats['updated'], 0, ',', '.').' baris dilengkapi · '.number_format($stats['skipped'], 0, ',', '.').' sudah sesuai.')
+                            ->success()
+                            ->send();
+                    }),
+
+                Action::make('resetData')
+                    ->label('Reset Data')
+                    ->icon('heroicon-o-trash')
+                    ->color('danger')
+                    ->visible(fn (): bool => static::canResetData())
+                    ->authorize(fn (): bool => static::canResetData())
+                    ->modalHeading(function (): string {
+                        if (! AppSetting::hasDataPengirimanResetPassword()) {
+                            return 'Atur Password Reset Data Pengiriman';
+                        }
+
+                        return $this->isManagingResetPassword()
+                            ? 'Ubah Password Reset'
+                            : 'Reset Data Pengiriman';
+                    })
+                    ->modalDescription(function (): string {
+                        if (! AppSetting::hasDataPengirimanResetPassword()) {
+                            return 'Password reset belum diatur di database server ini. Tetapkan password reset terlebih dahulu (tersimpan terenkripsi di database).';
+                        }
+
+                        return $this->isManagingResetPassword()
+                            ? 'Masukkan password reset saat ini lalu tetapkan password baru (tersimpan terenkripsi di database).'
+                            : 'Tindakan ini menghapus data secara permanen untuk pengujian atau upload ulang. Masukkan password reset untuk melanjutkan.';
+                    })
+                    ->modalWidth(Width::Medium)
+                    ->modalSubmitActionLabel(fn (): string => $this->isManagingResetPassword()
+                        ? 'Simpan Password'
+                        : 'Ya, Reset Data')
+                    ->modalSubmitAction(fn (Action $action): Action => $action
+                        ->color($this->isManagingResetPassword() ? 'primary' : 'danger'))
+                    ->schema(function (): array {
+                        $hasPassword = AppSetting::hasDataPengirimanResetPassword();
+                        $isSettingPassword = fn (Get $get): bool => ! $hasPassword || (bool) ($get('manage_password') ?? false);
+
+                        return [
+                            Toggle::make('manage_password')
+                                ->label('Atur / Ubah Password Reset')
+                                ->default(! $hasPassword)
+                                ->visible($hasPassword)
+                                ->live(),
+
+                            Select::make('scope')
+                                ->label('Data yang di-reset')
+                                ->options([
+                                    'all' => 'Semua Data Pengiriman',
+                                    'to' => 'Hanya Realisasi TO',
+                                    'spreadsheet' => 'Hanya Hasil Import Spreadsheet',
+                                    'csa' => 'Hanya Upload Penjualan CSA',
+                                    'surat_jalan' => 'Hanya Hasil Sinkron Surat Jalan',
+                                ])
+                                ->default('all')
+                                ->live()
+                                ->visible(fn (Get $get): bool => ! $isSettingPassword($get))
+                                ->required(fn (Get $get): bool => ! $isSettingPassword($get)),
+
+                            Toggle::make('reset_imports')
+                                ->label('Ikut hapus riwayat batch di menu Upload CSA')
+                                ->helperText('Mengosongkan daftar file di menu Import Penjualan CSA. Data alokasi stok tetap aman.')
+                                ->default(false)
+                                ->visible(fn (Get $get): bool => ! $isSettingPassword($get) && ($get('scope') ?? 'all') === 'all'),
+
+                            TextInput::make('confirmation')
+                                ->label('Ketik RESET untuk konfirmasi')
+                                ->placeholder('RESET')
+                                ->visible(fn (Get $get): bool => ! $isSettingPassword($get))
+                                ->required(fn (Get $get): bool => ! $isSettingPassword($get))
+                                ->rule('in:RESET')
+                                ->validationMessages([
+                                    'in' => 'Ketik RESET dengan huruf kapital untuk mengonfirmasi.',
+                                ]),
+
+                            TextInput::make('password')
+                                ->label('Password Reset')
+                                ->password()
+                                ->revealable()
+                                ->visible(fn (Get $get): bool => ! $isSettingPassword($get))
+                                ->required(fn (Get $get): bool => ! $isSettingPassword($get))
+                                ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                    if (! AppSetting::verifyDataPengirimanResetPassword((string) $value)) {
+                                        $fail('Password reset salah.');
+                                    }
+                                }),
+
+                            TextInput::make('current_reset_password')
+                                ->label('Password Reset Saat Ini')
+                                ->password()
+                                ->revealable()
+                                ->visible(fn (Get $get): bool => $hasPassword && $isSettingPassword($get))
+                                ->required(fn (Get $get): bool => $hasPassword && $isSettingPassword($get))
+                                ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                    if (! AppSetting::verifyDataPengirimanResetPassword((string) $value)) {
+                                        $fail('Password reset saat ini salah.');
+                                    }
+                                }),
+
+                            TextInput::make('new_password')
+                                ->label('Password Reset Baru')
+                                ->password()
+                                ->revealable()
+                                ->minLength(6)
+                                ->confirmed()
+                                ->visible($isSettingPassword)
+                                ->required($isSettingPassword)
+                                ->validationMessages([
+                                    'min' => 'Password reset minimal 6 karakter.',
+                                    'confirmed' => 'Konfirmasi password reset tidak cocok.',
+                                ]),
+
+                            TextInput::make('new_password_confirmation')
+                                ->label('Ulangi Password Reset Baru')
+                                ->password()
+                                ->revealable()
+                                ->visible($isSettingPassword)
+                                ->required($isSettingPassword),
+                        ];
+                    })
+                    ->action(function (array $data): void {
+                        $settingMode = ! AppSetting::hasDataPengirimanResetPassword()
+                            || (bool) ($data['manage_password'] ?? false);
+
+                        if ($settingMode) {
+                            AppSetting::setDataPengirimanResetPassword((string) $data['new_password']);
+
+                            Log::info('Password Reset Data Pengiriman diperbarui oleh Super Admin', [
+                                'user_id' => auth()->id(),
+                                'user_email' => auth()->user()?->email,
+                            ]);
+
+                            Notification::make()
+                                ->title('Password Reset tersimpan')
+                                ->body('Password reset baru sudah disimpan terenkripsi di database.')
+                                ->success()
+                                ->send();
+
+                            return;
+                        }
+
+                        $scope = (string) ($data['scope'] ?? 'all');
+                        $resetImports = $scope === 'all' && (bool) ($data['reset_imports'] ?? false);
+
+                        [$deletedShipments, $deletedImports] = $this->performReset($scope, $resetImports);
+
+                        Log::warning('Data Pengiriman di-reset oleh Super Admin', [
+                            'user_id' => auth()->id(),
+                            'user_email' => auth()->user()?->email,
+                            'scope' => $scope,
+                            'reset_imports' => $resetImports,
+                            'deleted_shipments' => $deletedShipments,
+                            'deleted_imports' => $deletedImports,
+                        ]);
+
+                        $body = number_format($deletedShipments, 0, ',', '.').' baris Data Pengiriman dihapus.';
+                        if ($deletedImports > 0) {
+                            $body .= ' '.$deletedImports.' riwayat Upload CSA ikut dikosongkan.';
+                        }
+
+                        Notification::make()
+                            ->title('Reset Data Pengiriman berhasil')
+                            ->body($body)
+                            ->success()
+                            ->send();
+                    }),
+            ])
+                ->label('Lainnya')
+                ->icon('heroicon-m-chevron-down')
+                ->iconPosition(IconPosition::After)
                 ->color('gray')
-                ->modalHeading('Export Data Pengiriman')
-                ->modalDescription('Pilih filter data yang ingin di-export. Kosongkan pilihan untuk mengekspor seluruh data sesuai tampilan tabel.')
-                ->modalWidth(Width::Medium)
-                ->modalSubmitActionLabel('Export Excel')
-                ->fillForm(fn (): array => [
-                    'jenis' => $this->tableFilters['jenis']['value'] ?? null,
-                    'badan_usaha' => $this->tableFilters['badan_usaha']['value'] ?? null,
-                    'bulan' => null,
-                ])
-                ->schema([
-                    Select::make('jenis')
-                        ->label('Jenis Data')
-                        ->placeholder('Semua (SJ & Realisasi TO)')
-                        ->options([
-                            'sj' => 'SJ (Penjualan)',
-                            'to' => 'Realisasi TO',
-                            'surat_jalan' => 'Surat Jalan',
-                            'manual' => 'Input Manual',
-                        ]),
-
-                    Select::make('badan_usaha')
-                        ->label('Badan Usaha')
-                        ->placeholder('Semua badan usaha')
-                        ->options(fn (): array => self::badanUsahaOptions())
-                        ->searchable(),
-
-                    Select::make('bulan')
-                        ->label('Bulan Pengiriman')
-                        ->placeholder('Semua bulan')
-                        ->options(fn (): array => $this->monthOptions())
-                        ->searchable(),
-                ])
-                ->action(function (array $data): StreamedResponse {
-                    $query = $this->applyExportFilters(clone $this->getFilteredSortedTableQuery(), $data);
-
-                    return app(DataPengirimanExporter::class)->download(
-                        $query,
-                        $this->exportFileName($data),
-                    );
-                }),
-
-            Action::make('importSpreadsheet')
-                ->label('Import Spreadsheet')
-                ->color('gray')
-                // Mengisi semua cabang sekaligus, jadi hanya untuk admin pusat
-                ->visible(fn (): bool => blank(auth()->user()?->cabangScope())
-                    && (auth()->user()?->can('create', CsaShipment::class) ?? false))
-                ->modalHeading('Import Spreadsheet Update Pengiriman')
-                ->modalDescription('Download Google Sheet lewat File → Download → Microsoft Excel (.xlsx), lalu upload di sini. Setiap tab menjadi cabang dengan kolom yang sama seperti tabel ini.')
-                ->modalWidth(Width::Large)
-                ->modalSubmitActionLabel('Import')
-                ->schema([
-                    FileUpload::make('file')
-                        ->label('File spreadsheet (.xlsx)')
-                        ->disk('local')
-                        ->directory('pengiriman-imports')
-                        ->acceptedFileTypes([
-                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            'application/octet-stream',
-                            'application/zip',
-                        ])
-                        ->maxSize(102400)
-                        ->storeFileNamesIn('file_name')
-                        ->required(),
-                    Toggle::make('replace_existing')
-                        ->label('Ganti data hasil import spreadsheet sebelumnya')
-                        ->helperText('Untuk cabang yang ada di file ini, supaya import ulang tidak dobel. Data dari upload CSA dan input manual tidak ikut terhapus.')
-                        ->default(true),
-                ])
-                ->action(function (array $data): void {
-                    ImportShipmentSpreadsheetJob::dispatch(
-                        $data['file'],
-                        $data['file_name'] ?? basename($data['file']),
-                        (bool) ($data['replace_existing'] ?? true),
-                        auth()->id(),
-                    );
-
-                    Notification::make()
-                        ->title('Import spreadsheet sedang diproses')
-                        ->body('Berjalan di belakang layar ±1–3 menit. Hasilnya muncul di notifikasi lonceng di kanan atas.')
-                        ->success()
-                        ->send();
-                }),
+                ->button(),
 
             CreateAction::make()
                 ->label('Tambah Manual')
@@ -149,189 +343,6 @@ class ListCsaShipments extends ManageRecords
                     $data['is_synced'] = false;
 
                     return $data;
-                }),
-
-            Action::make('syncTrackingOrders')
-                ->label('Sinkron Surat Jalan')
-                ->icon('heroicon-o-arrow-path')
-                ->color('gray')
-                ->visible(fn (): bool => (auth()->user()?->can('create', CsaShipment::class) ?? false)
-                    || (auth()->user()?->can('update', new CsaShipment) ?? false))
-                ->requiresConfirmation()
-                ->modalHeading('Sinkronisasi Data Surat Jalan')
-                ->modalDescription('Mengambil data dari menu Surat Jalan berdasarkan Nomor SJ. Jika No SJ belum ada di Data Pengiriman (data CSA belum di-upload), baris baru dibuat otomatis; jika sudah ada, kolom kosong seperti alamat, kota, nama ekspedisi (INTERNAL), dan tanggal diterima dilengkapi tanpa menimpa data CSA atau isian admin.')
-                ->modalSubmitActionLabel('Sinkron Sekarang')
-                ->action(function (): void {
-                    $stats = app(TrackingOrderShipmentSyncService::class)->syncAll(auth()->user()?->cabangScope());
-
-                    Notification::make()
-                        ->title('Sinkronisasi Surat Jalan selesai')
-                        ->body(number_format($stats['created'], 0, ',', '.').' data baru ditambahkan · '.number_format($stats['updated'], 0, ',', '.').' baris dilengkapi · '.number_format($stats['skipped'], 0, ',', '.').' sudah sesuai.')
-                        ->success()
-                        ->send();
-                }),
-
-            Action::make('resetData')
-                ->label('Reset Data')
-                ->color('danger')
-                ->outlined()
-                ->visible(fn (): bool => static::canResetData())
-                ->authorize(fn (): bool => static::canResetData())
-                ->modalHeading(function (): string {
-                    if (! AppSetting::hasDataPengirimanResetPassword()) {
-                        return 'Atur Password Reset Data Pengiriman';
-                    }
-
-                    return $this->isManagingResetPassword()
-                        ? 'Ubah Password Reset'
-                        : 'Reset Data Pengiriman';
-                })
-                ->modalDescription(function (): string {
-                    if (! AppSetting::hasDataPengirimanResetPassword()) {
-                        return 'Password reset belum diatur di database server ini. Tetapkan password reset terlebih dahulu (tersimpan terenkripsi di database).';
-                    }
-
-                    return $this->isManagingResetPassword()
-                        ? 'Masukkan password reset saat ini lalu tetapkan password baru (tersimpan terenkripsi di database).'
-                        : 'Tindakan ini menghapus data secara permanen untuk pengujian atau upload ulang. Masukkan password reset untuk melanjutkan.';
-                })
-                ->modalWidth(Width::Medium)
-                ->modalSubmitActionLabel(fn (): string => $this->isManagingResetPassword()
-                    ? 'Simpan Password'
-                    : 'Ya, Reset Data')
-                ->modalSubmitAction(fn (Action $action): Action => $action
-                    ->color($this->isManagingResetPassword() ? 'primary' : 'danger'))
-                ->schema(function (): array {
-                    $hasPassword = AppSetting::hasDataPengirimanResetPassword();
-                    $isSettingPassword = fn (Get $get): bool => ! $hasPassword || (bool) ($get('manage_password') ?? false);
-
-                    return [
-                        Toggle::make('manage_password')
-                            ->label('Atur / Ubah Password Reset')
-                            ->default(! $hasPassword)
-                            ->visible($hasPassword)
-                            ->live(),
-
-                        Select::make('scope')
-                            ->label('Data yang di-reset')
-                            ->options([
-                                'all' => 'Semua Data Pengiriman',
-                                'to' => 'Hanya Realisasi TO',
-                                'spreadsheet' => 'Hanya Hasil Import Spreadsheet',
-                                'csa' => 'Hanya Upload Penjualan CSA',
-                                'surat_jalan' => 'Hanya Hasil Sinkron Surat Jalan',
-                            ])
-                            ->default('all')
-                            ->live()
-                            ->visible(fn (Get $get): bool => ! $isSettingPassword($get))
-                            ->required(fn (Get $get): bool => ! $isSettingPassword($get)),
-
-                        Toggle::make('reset_imports')
-                            ->label('Ikut hapus riwayat batch di menu Upload CSA')
-                            ->helperText('Mengosongkan daftar file di menu Import Penjualan CSA. Data alokasi stok tetap aman.')
-                            ->default(false)
-                            ->visible(fn (Get $get): bool => ! $isSettingPassword($get) && ($get('scope') ?? 'all') === 'all'),
-
-                        TextInput::make('confirmation')
-                            ->label('Ketik RESET untuk konfirmasi')
-                            ->placeholder('RESET')
-                            ->visible(fn (Get $get): bool => ! $isSettingPassword($get))
-                            ->required(fn (Get $get): bool => ! $isSettingPassword($get))
-                            ->rule('in:RESET')
-                            ->validationMessages([
-                                'in' => 'Ketik RESET dengan huruf kapital untuk mengonfirmasi.',
-                            ]),
-
-                        TextInput::make('password')
-                            ->label('Password Reset')
-                            ->password()
-                            ->revealable()
-                            ->visible(fn (Get $get): bool => ! $isSettingPassword($get))
-                            ->required(fn (Get $get): bool => ! $isSettingPassword($get))
-                            ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
-                                if (! AppSetting::verifyDataPengirimanResetPassword((string) $value)) {
-                                    $fail('Password reset salah.');
-                                }
-                            }),
-
-                        TextInput::make('current_reset_password')
-                            ->label('Password Reset Saat Ini')
-                            ->password()
-                            ->revealable()
-                            ->visible(fn (Get $get): bool => $hasPassword && $isSettingPassword($get))
-                            ->required(fn (Get $get): bool => $hasPassword && $isSettingPassword($get))
-                            ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
-                                if (! AppSetting::verifyDataPengirimanResetPassword((string) $value)) {
-                                    $fail('Password reset saat ini salah.');
-                                }
-                            }),
-
-                        TextInput::make('new_password')
-                            ->label('Password Reset Baru')
-                            ->password()
-                            ->revealable()
-                            ->minLength(6)
-                            ->confirmed()
-                            ->visible($isSettingPassword)
-                            ->required($isSettingPassword)
-                            ->validationMessages([
-                                'min' => 'Password reset minimal 6 karakter.',
-                                'confirmed' => 'Konfirmasi password reset tidak cocok.',
-                            ]),
-
-                        TextInput::make('new_password_confirmation')
-                            ->label('Ulangi Password Reset Baru')
-                            ->password()
-                            ->revealable()
-                            ->visible($isSettingPassword)
-                            ->required($isSettingPassword),
-                    ];
-                })
-                ->action(function (array $data): void {
-                    $settingMode = ! AppSetting::hasDataPengirimanResetPassword()
-                        || (bool) ($data['manage_password'] ?? false);
-
-                    if ($settingMode) {
-                        AppSetting::setDataPengirimanResetPassword((string) $data['new_password']);
-
-                        Log::info('Password Reset Data Pengiriman diperbarui oleh Super Admin', [
-                            'user_id' => auth()->id(),
-                            'user_email' => auth()->user()?->email,
-                        ]);
-
-                        Notification::make()
-                            ->title('Password Reset tersimpan')
-                            ->body('Password reset baru sudah disimpan terenkripsi di database.')
-                            ->success()
-                            ->send();
-
-                        return;
-                    }
-
-                    $scope = (string) ($data['scope'] ?? 'all');
-                    $resetImports = $scope === 'all' && (bool) ($data['reset_imports'] ?? false);
-
-                    [$deletedShipments, $deletedImports] = $this->performReset($scope, $resetImports);
-
-                    Log::warning('Data Pengiriman di-reset oleh Super Admin', [
-                        'user_id' => auth()->id(),
-                        'user_email' => auth()->user()?->email,
-                        'scope' => $scope,
-                        'reset_imports' => $resetImports,
-                        'deleted_shipments' => $deletedShipments,
-                        'deleted_imports' => $deletedImports,
-                    ]);
-
-                    $body = number_format($deletedShipments, 0, ',', '.').' baris Data Pengiriman dihapus.';
-                    if ($deletedImports > 0) {
-                        $body .= ' '.$deletedImports.' riwayat Upload CSA ikut dikosongkan.';
-                    }
-
-                    Notification::make()
-                        ->title('Reset Data Pengiriman berhasil')
-                        ->body($body)
-                        ->success()
-                        ->send();
                 }),
         ];
     }

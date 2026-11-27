@@ -4,9 +4,7 @@ namespace App\Filament\Resources\TrackingOrders\Pages;
 
 use App\Filament\Resources\TrackingOrders\TrackingOrderResource;
 use App\Jobs\ExportTrackingOrdersJob;
-use App\Models\CsaShipment;
 use App\Services\TrackingOrderExporter;
-use App\Services\TrackingOrderShipmentSyncService;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\Exports\Models\Export;
@@ -54,26 +52,6 @@ class ListTrackingOrders extends ListRecords
                     Notification::make()
                         ->title('Export dimulai')
                         ->body('Tombol Download muncul di notifikasi lonceng setelah file selesai dibuat.')
-                        ->success()
-                        ->send();
-                }),
-
-            Action::make('syncToDataPengiriman')
-                ->label('Sinkron ke Data Pengiriman')
-                ->icon('heroicon-o-arrow-path')
-                ->color('gray')
-                ->visible(fn (): bool => (auth()->user()?->can('create', CsaShipment::class) ?? false)
-                    || (auth()->user()?->can('update', new CsaShipment) ?? false))
-                ->requiresConfirmation()
-                ->modalHeading('Sinkronkan Surat Jalan ke Data Pengiriman')
-                ->modalDescription('Menyinkronkan seluruh data Surat Jalan (berdasarkan Nomor SJ) ke tabel Data Pengiriman. Data CSA atau isian admin yang sudah ada tidak akan ditimpa.')
-                ->modalSubmitActionLabel('Sinkron Sekarang')
-                ->action(function (): void {
-                    $stats = app(TrackingOrderShipmentSyncService::class)->syncAll(auth()->user()?->cabangScope());
-
-                    Notification::make()
-                        ->title('Sinkronisasi ke Data Pengiriman selesai')
-                        ->body(number_format($stats['created'], 0, ',', '.').' data baru ditambahkan · '.number_format($stats['updated'], 0, ',', '.').' baris dilengkapi · '.number_format($stats['skipped'], 0, ',', '.').' sudah sesuai.')
                         ->success()
                         ->send();
                 }),
