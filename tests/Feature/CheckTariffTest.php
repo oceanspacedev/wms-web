@@ -137,7 +137,7 @@ class CheckTariffTest extends TestCase
     {
         Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->assertSet('data.origin', null)
+            ->assertSet('data.origin', [])
             ->assertSet('data.destination', null)
             ->assertSet('data.weight', null)
             ->assertSet('hasSearched', false)
@@ -165,7 +165,7 @@ class CheckTariffTest extends TestCase
     {
         Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->set('data.origin', 'JAKARTA')
+            ->set('data.origin', ['JAKARTA'])
             ->set('data.destination', 'BANDUNG')
             ->set('data.weight', 10)
             ->set('data.service', 'DARAT')
@@ -187,7 +187,7 @@ class CheckTariffTest extends TestCase
     {
         Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->set('data.origin', 'CIREBON')
+            ->set('data.origin', ['CIREBON'])
             ->set('data.destination', 'BANDUNG')
             ->set('data.weight', 5)
             ->set('data.service', 'UDARA')
@@ -207,13 +207,13 @@ class CheckTariffTest extends TestCase
     {
         Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->set('data.origin', 'JAKARTA')
+            ->set('data.origin', ['JAKARTA'])
             ->set('data.destination', 'SURABAYA')
             ->set('data.weight', 20)
             ->call('checkTariff')
             ->assertSet('hasSearched', true)
             ->call('resetSearch')
-            ->assertSet('data.origin', null)
+            ->assertSet('data.origin', [])
             ->assertSet('data.destination', null)
             ->assertSet('data.weight', null)
             ->assertSet('hasSearched', false)
@@ -236,7 +236,7 @@ class CheckTariffTest extends TestCase
         Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
             ->call('applyHistory', $history->id)
-            ->assertSet('data.origin', 'CIREBON')
+            ->assertSet('data.origin', ['CIREBON'])
             ->assertSet('data.destination', 'BANDUNG')
             ->assertSet('data.weight', 5)
             ->assertSet('hasSearched', true)
@@ -283,7 +283,7 @@ class CheckTariffTest extends TestCase
         Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
             ->call('loadScreenshotExample')
-            ->assertSet('data.origin', 'MANADO')
+            ->assertSet('data.origin', ['MANADO'])
             ->assertSet('data.destination', 'PALEMBANG')
             ->assertSet('data.weight', 26)
             ->assertSet('data.total_amount', 59040000)
@@ -313,7 +313,7 @@ class CheckTariffTest extends TestCase
     {
         $test = Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->set('data.origin', 'JAKARTA')
+            ->set('data.origin', ['JAKARTA'])
             ->set('data.destination', 'BANDUNG')
             ->set('data.weight', 26)
             ->set('data.service', '')
@@ -393,7 +393,7 @@ class CheckTariffTest extends TestCase
 
         $component = Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->set('data.origin', 'CIREBON')
+            ->set('data.origin', ['CIREBON'])
             ->set('data.destination', 'JAKARTA')
             ->set('data.weight', 10)
             ->set('data.service', '')
@@ -460,7 +460,7 @@ class CheckTariffTest extends TestCase
 
         $component = Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->set('data.origin', 'JAKARTA')
+            ->set('data.origin', ['JAKARTA'])
             ->set('data.destination', 'BANDUNG')
             ->set('data.district', 'SOREANG')
             ->set('data.weight', 10)
@@ -493,7 +493,7 @@ class CheckTariffTest extends TestCase
         // Bisa cari kecamatan langsung tanpa memilih kota tujuan lebih dulu
         $directSelection = Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->set('data.origin', 'JAKARTA');
+            ->set('data.origin', ['JAKARTA']);
 
         $districtSearchResults = $directSelection->instance()->searchDistrictsForOrigin('JAKARTA', 'sore');
         $this->assertSame(['BANDUNG||SOREANG' => 'SOREANG (Kota: BANDUNG)'], $districtSearchResults);
@@ -502,6 +502,111 @@ class CheckTariffTest extends TestCase
             ->set('data.district', 'BANDUNG||SOREANG')
             ->assertSet('data.destination', 'BANDUNG')
             ->assertSet('data.district', 'SOREANG');
+    }
+
+    public function test_check_tariff_supports_selecting_multiple_origin_cities_in_one_comparison(): void
+    {
+        $sentral = Expedition::create(['name' => 'SENTRAL CARGO', 'code' => 'SNT', 'is_active' => true]);
+        $express21 = Expedition::create(['name' => '21 EXPRES', 'code' => '21EXP', 'is_active' => true]);
+
+        // SURABAYA -> DENPASAR lebih murah (3.500/kg = 35.000)
+        ExpeditionRateCard::create([
+            'expedition_id' => $sentral->id,
+            'origin_depo' => 'SURABAYA',
+            'destination_city' => 'DENPASAR',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 3500,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '2',
+            'is_active' => true,
+        ]);
+
+        // SURABAYA -> MATARAM hanya ada dari SURABAYA
+        ExpeditionRateCard::create([
+            'expedition_id' => $sentral->id,
+            'origin_depo' => 'SURABAYA',
+            'destination_city' => 'MATARAM',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 6000,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '3',
+            'is_active' => true,
+        ]);
+
+        // JAKARTA -> DENPASAR lebih mahal (7.000/kg = 70.000)
+        ExpeditionRateCard::create([
+            'expedition_id' => $express21->id,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'DENPASAR',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 7000,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '3-4',
+            'is_active' => true,
+        ]);
+
+        // JAKARTA -> MAKASSAR hanya ada dari JAKARTA
+        ExpeditionRateCard::create([
+            'expedition_id' => $express21->id,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'MAKASSAR',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 9000,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '4',
+            'is_active' => true,
+        ]);
+
+        $component = Livewire::actingAs($this->user)
+            ->test(CheckTariff::class)
+            ->set('data.origin', ['JAKARTA', 'SURABAYA']);
+
+        // Daftar tujuan adalah gabungan dari semua kota asal yang dipilih
+        $destinations = $component->instance()->getDestinationOptionsForOrigins(['JAKARTA', 'SURABAYA']);
+        $this->assertArrayHasKey('DENPASAR', $destinations);
+        $this->assertArrayHasKey('MATARAM', $destinations);
+        $this->assertArrayHasKey('MAKASSAR', $destinations);
+
+        $component
+            ->set('data.destination', 'DENPASAR')
+            ->set('data.weight', 10)
+            ->set('data.service', 'DARAT')
+            ->call('checkTariff')
+            ->assertSet('hasSearched', true)
+            ->assertSet('searchedOrigins', ['JAKARTA', 'SURABAYA'])
+            ->assertSee('Kota Asal')
+            ->assertSee('SURABAYA')
+            ->assertSee('JAKARTA')
+            ->assertSee('SENTRAL CARGO')
+            ->assertSee('21 EXPRES');
+
+        $rates = $component->get('rates');
+        $this->assertCount(2, $rates);
+        $this->assertSame('SURABAYA', $rates[0]['origin']);
+        $this->assertSame('SENTRAL CARGO', $rates[0]['expedition']);
+        $this->assertEquals(35000.0, $rates[0]['total_cost']);
+        $this->assertSame('JAKARTA', $rates[1]['origin']);
+        $this->assertSame('21 EXPRES', $rates[1]['expedition']);
+        $this->assertEquals(70000.0, $rates[1]['total_cost']);
+
+        $history = TariffSearchHistory::query()->latest('id')->first();
+        $this->assertNotNull($history);
+        $this->assertSame('JAKARTA, SURABAYA', $history->origin);
+        $this->assertSame('DENPASAR', $history->destination);
+
+        // Buka kembali riwayat multi-origin harus memulihkan semua kota asal
+        Livewire::actingAs($this->user)
+            ->test(CheckTariff::class)
+            ->call('applyHistory', $history->id)
+            ->assertSet('data.origin', ['SURABAYA', 'JAKARTA'])
+            ->assertSet('searchedOrigins', ['SURABAYA', 'JAKARTA'])
+            ->assertSee('Kota Asal')
+            ->assertSee('SURABAYA')
+            ->assertSee('JAKARTA');
     }
 
     /**
