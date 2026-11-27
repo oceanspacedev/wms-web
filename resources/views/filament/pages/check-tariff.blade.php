@@ -174,7 +174,12 @@
                                                 <div class="space-y-1">
                                                     @foreach($ratesList as $idx => $rate)
                                                         <div class="flex items-center justify-between gap-3 text-xs">
-                                                            <div class="flex items-center gap-1.5">
+                                                            <div class="flex items-center gap-1.5 flex-wrap">
+                                                                @if(!empty($rate['origin']) && str_contains((string) $item->origin, ','))
+                                                                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300">
+                                                                        {{ $rate['origin'] }}
+                                                                    </span>
+                                                                @endif
                                                                 <span class="font-medium text-gray-950 dark:text-white">{{ $rate['expedition'] }}</span>
                                                                 <span class="text-gray-400">({{ $rate['service'] }})</span>
                                                                 @if($idx === 0)
@@ -246,6 +251,9 @@
 
         {{-- Results Section (Consistent Filament Table Layout Sesuai Foto Pertama) --}}
         @if($hasSearched && !$showHistory)
+            @php
+                $showOriginColumn = count($searchedOrigins) > 1;
+            @endphp
             @if(count($rates) > 0)
                 <div 
                     x-data="{ search: '' }"
@@ -259,7 +267,17 @@
                             </h3>
                             <span class="text-gray-300 dark:text-gray-600">&bull;</span>
                             <div class="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 flex-wrap">
-                                <span class="font-medium text-gray-950 dark:text-white">{{ $searchedOrigin }}</span>
+                                @if($showOriginColumn)
+                                    <span class="inline-flex items-center gap-1 flex-wrap">
+                                        @foreach($searchedOrigins as $origBadge)
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300">
+                                                {{ $origBadge }}
+                                            </span>
+                                        @endforeach
+                                    </span>
+                                @else
+                                    <span class="font-medium text-gray-950 dark:text-white">{{ $searchedOrigin }}</span>
+                                @endif
                                 <span class="text-gray-400 font-semibold">&rarr;</span>
                                 <span class="font-medium text-gray-950 dark:text-white">{{ $searchedDestination }}@if(!empty($searchedDistrict)), Kec. {{ $searchedDistrict }}@endif</span>
                                 <span class="text-gray-500 dark:text-gray-400">({{ $searchedWeight }} KG)</span>
@@ -279,7 +297,7 @@
                                 </div>
                                 <input 
                                     type="search" 
-                                    placeholder="Search..." 
+                                    placeholder="{{ $showOriginColumn ? 'Cari asal / ekspedisi...' : 'Search...' }}" 
                                     x-model="search"
                                     class="block w-40 sm:w-56 rounded-lg border-0 py-1.5 ps-9 pe-3 text-sm text-gray-950 ring-1 ring-inset ring-gray-950/10 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-600 dark:bg-white/5 dark:text-white dark:ring-white/20 dark:placeholder:text-gray-500 dark:focus:ring-primary-500"
                                 />
@@ -292,7 +310,12 @@
                         <table class="w-full table-auto divide-y divide-gray-200 text-start dark:divide-white/5">
                             <thead class="bg-gray-50/50 dark:bg-white/5">
                                 <tr>
-                                    <th scope="col" class="px-4 py-3.5 ps-4 sm:ps-6 text-start text-sm font-semibold text-gray-950 dark:text-white">
+                                    @if($showOriginColumn)
+                                        <th scope="col" class="px-4 py-3.5 ps-4 sm:ps-6 text-start text-sm font-semibold text-gray-950 dark:text-white">
+                                            Kota Asal
+                                        </th>
+                                    @endif
+                                    <th scope="col" class="px-4 py-3.5 {{ $showOriginColumn ? '' : 'ps-4 sm:ps-6' }} text-start text-sm font-semibold text-gray-950 dark:text-white">
                                         Ekspedisi
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-start text-sm font-semibold text-gray-950 dark:text-white">
@@ -327,11 +350,19 @@
                             <tbody class="divide-y divide-gray-200 dark:divide-white/5">
                                 @foreach($rates as $index => $rate)
                                     <tr 
-                                        x-show="!search || '{{ strtolower($rate['expedition'] . ' ' . $rate['service']) }}'.includes(search.toLowerCase())"
+                                        x-show="!search || {{ \Illuminate\Support\Js::from(strtolower(($rate['origin'] ?? '') . ' ' . $rate['expedition'] . ' ' . $rate['service'])) }}.includes(search.toLowerCase())"
                                         class="transition duration-75 hover:bg-gray-50/50 dark:hover:bg-white/5"
                                     >
+                                        @if($showOriginColumn)
+                                            <td class="px-4 py-4 ps-4 sm:ps-6 text-sm text-gray-950 dark:text-white align-middle whitespace-nowrap">
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-200">
+                                                    {{ $rate['origin'] ?? '-' }}
+                                                </span>
+                                            </td>
+                                        @endif
+
                                         {{-- Ekspedisi --}}
-                                        <td class="px-4 py-4 ps-4 sm:ps-6 text-sm text-gray-950 dark:text-white align-middle whitespace-nowrap">
+                                        <td class="px-4 py-4 {{ $showOriginColumn ? '' : 'ps-4 sm:ps-6' }} text-sm text-gray-950 dark:text-white align-middle whitespace-nowrap">
                                             <div class="flex items-center gap-1.5 flex-wrap">
                                                 <span class="font-medium text-gray-950 dark:text-white">{{ $rate['expedition'] }}</span>
                                                 @if($index === 0)
@@ -445,7 +476,7 @@
                                 @foreach($suggested as $dest)
                                     <button 
                                         type="button" 
-                                        wire:click="setRoute('{{ $searchedOrigin }}', '{{ $dest }}', {{ $searchedWeight }}, '')"
+                                        wire:click="setRoute({{ \Illuminate\Support\Js::from($searchedOrigins !== [] ? $searchedOrigins : [$searchedOrigin]) }}, {{ \Illuminate\Support\Js::from($dest) }}, {{ $searchedWeight }}, '')"
                                         class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-white/10 dark:hover:bg-white/15 dark:text-gray-200 transition cursor-pointer"
                                     >
                                         {{ $dest }} &rarr;

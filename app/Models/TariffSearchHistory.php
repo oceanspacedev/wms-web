@@ -60,15 +60,23 @@ class TariffSearchHistory extends Model
         try {
             /** @var FreightRateGoogleSheetService $service */
             $service = app(FreightRateGoogleSheetService::class);
-            $rates = $service->compareRates($this->origin, $this->destination, $this->weight, $this->service);
+            $origins = array_values(array_filter(array_map('trim', explode(',', (string) $this->origin))));
+            $summary = [];
 
-            if (! empty($rates)) {
-                $summary = array_map(fn ($r) => [
-                    'expedition' => (string) $r['expedition'],
-                    'service' => (string) $r['service'],
-                    'total_cost' => $r['total_cost'],
-                ], $rates);
+            foreach ($origins as $origin) {
+                $rates = $service->compareRates($origin, $this->destination, $this->weight, $this->service);
+                foreach ($rates as $r) {
+                    $summary[] = [
+                        'origin' => $origin,
+                        'expedition' => (string) $r['expedition'],
+                        'service' => (string) $r['service'],
+                        'total_cost' => $r['total_cost'],
+                    ];
+                }
+            }
 
+            if ($summary !== []) {
+                usort($summary, fn (array $a, array $b): int => $a['total_cost'] <=> $b['total_cost']);
                 $this->update(['rates_summary' => $summary]);
 
                 return $summary;
