@@ -195,7 +195,7 @@ class TrackingOrderTest extends TestCase
         $this->assertSame('BANDUNG', $shipment->nama_kota);
         $this->assertSame('INTERNAL', $shipment->nama_ekspedisi);
         $this->assertEquals(4500000, (float) $shipment->total_nominal_sj);
-        $this->assertNull($shipment->status_pengiriman);
+        $this->assertSame('Sudah Diterima', $shipment->status_pengiriman);
         $this->assertSame('2026-11-21', $shipment->tanggal_diterima?->toDateString());
 
         // 2. Nanti laporan CSA berisi No SJ yang sama di-upload -> digabung ke baris tersebut, tanpa duplikat
@@ -255,7 +255,7 @@ class TrackingOrderTest extends TestCase
         $this->assertSame('Jl. Soekarno Hatta No. 12, Bandung City, West Java', $shipment->alamat_kirim);
         $this->assertSame('BANDUNG', $shipment->nama_kota);
         $this->assertSame('INTERNAL', $shipment->nama_ekspedisi);
-        $this->assertNull($shipment->status_pengiriman);
+        $this->assertSame('Sudah Diterima', $shipment->status_pengiriman);
         $this->assertSame('2026-11-21', $shipment->tanggal_diterima?->toDateString());
     }
 
@@ -318,7 +318,7 @@ class TrackingOrderTest extends TestCase
         $this->assertSame('Jl. Siliwangi No. 88, Kota Cirebon, Jawa Barat', $created->alamat_kirim);
         $this->assertSame('CIREBON', $created->nama_kota);
         $this->assertSame('INTERNAL', $created->nama_ekspedisi);
-        $this->assertNull($created->status_pengiriman);
+        $this->assertSame('Sudah Diterima', $created->status_pengiriman);
 
         // Baris CSA yang sudah ada dilengkapi kolom kosongnya; data CSA & admin tetap utuh
         $existingCsa->refresh();
@@ -326,13 +326,55 @@ class TrackingOrderTest extends TestCase
         $this->assertSame('RAX', $existingCsa->nama_ekspedisi);
         $this->assertSame('Kisabalanang, Marikangen, Kec. Plumbon, Kabupaten Cirebon', $existingCsa->alamat_kirim);
         $this->assertSame('KAB. CIREBON', $existingCsa->nama_kota);
-        $this->assertNull($existingCsa->status_pengiriman);
+        $this->assertSame('Sudah Diterima', $existingCsa->status_pengiriman);
         $this->assertSame('2026-11-23', $existingCsa->tanggal_diterima?->toDateString());
 
-        // Tombol di halaman Surat Jalan juga berjalan aman (idempoten)
+        // Tombol sinkron hanya ada di Data Pengiriman, tidak di halaman Surat Jalan
         Livewire::test(ListTrackingOrders::class)
-            ->callAction('syncToDataPengiriman')
-            ->assertNotified('Sinkronisasi ke Data Pengiriman selesai');
+            ->assertActionDoesNotExist('syncToDataPengiriman');
+    }
+
+    public function test_sync_fills_status_pengiriman_only_when_delivered_and_never_overwrites_admin_status(): void
+    {
+        $courier = User::factory()->create();
+
+        // Baris CSA yang sudah diisi status_pengiriman oleh admin tidak boleh tertimpa
+        $customStatusShipment = CsaShipment::create([
+            'source' => CsaShipment::SOURCE_CSA,
+            'no_sj' => 'SJ-CUSTOM-STATUS',
+            'kode_gudang' => 'GMCRB',
+            'target_sheet' => 'CIREBON',
+            'tujuan_dealer' => 'DEALER CUSTOM',
+            'status_pengiriman' => 'DITERIMA GUDANG',
+            'tanggal_kirim' => '2026-11-25',
+        ]);
+
+        TrackingOrder::create([
+            'user_id' => $courier->id,
+            'no_sj' => 'SJ-CUSTOM-STATUS',
+            'nama_dealer' => 'DEALER CUSTOM',
+            'tanggal_pengiriman' => '2026-11-26',
+            'nama_penerima' => 'Rina',
+        ]);
+
+        $customStatusShipment->refresh();
+        $this->assertSame('DITERIMA GUDANG', $customStatusShipment->status_pengiriman);
+
+        // SJ tanpa nama_penerima & foto_penerima tetap kosong sampai penerima diisi
+        $pendingOrder = TrackingOrder::create([
+            'user_id' => $courier->id,
+            'no_sj' => 'SJ-PENDING-01',
+            'nama_dealer' => 'DEALER PENDING',
+            'tanggal_pengiriman' => '2026-11-26',
+        ]);
+
+        $pendingShipment = CsaShipment::where('no_sj', 'SJ-PENDING-01')->sole();
+        $this->assertNull($pendingShipment->status_pengiriman);
+
+        $pendingOrder->update(['nama_penerima' => 'Doni']);
+        $pendingShipment->refresh();
+        $this->assertSame('Sudah Diterima', $pendingShipment->status_pengiriman);
+        $this->assertSame('2026-11-26', $pendingShipment->tanggal_diterima?->toDateString());
     }
 
     private function courierWithPanelAccess(): User
