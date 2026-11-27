@@ -21,6 +21,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Cache;
 
 class ExpeditionRateCardResource extends Resource
 {
@@ -166,6 +167,21 @@ class ExpeditionRateCardResource extends Resource
                 SelectFilter::make('expedition_id')
                     ->label('Ekspedisi')
                     ->relationship('expedition', 'name'),
+                SelectFilter::make('origin_depo')
+                    ->label('Asal (Depo)')
+                    ->placeholder('Semua asal')
+                    ->searchable()
+                    ->options(fn (): array => Cache::remember(
+                        'rate_cards:filter_origins:v'.ExpeditionRateCard::routeCacheVersion(),
+                        3600,
+                        fn (): array => ExpeditionRateCard::query()
+                            ->whereNotNull('origin_depo')
+                            ->where('origin_depo', '!=', '')
+                            ->distinct()
+                            ->orderBy('origin_depo')
+                            ->pluck('origin_depo', 'origin_depo')
+                            ->all(),
+                    )),
                 SelectFilter::make('service_type')
                     ->label('Layanan')
                     ->options([
