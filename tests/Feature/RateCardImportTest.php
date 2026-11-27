@@ -326,6 +326,40 @@ class RateCardImportTest extends TestCase
         Storage::disk('local')->assertMissing('rate-card-imports/lama.csv');
     }
 
+    public function test_rate_cards_table_can_filter_by_origin_depo(): void
+    {
+        $expedition = Expedition::create(['name' => 'RAX', 'code' => 'RAX', 'is_active' => true]);
+
+        $bandung = ExpeditionRateCard::create([
+            'expedition_id' => $expedition->id,
+            'origin_depo' => 'BANDUNG',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 3000,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0.2,
+            'is_active' => true,
+        ]);
+
+        $cirebon = ExpeditionRateCard::create([
+            'expedition_id' => $expedition->id,
+            'origin_depo' => 'CIREBON',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 2500,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0.2,
+            'is_active' => true,
+        ]);
+
+        Livewire::actingAs($this->user)
+            ->test(ManageExpeditionRateCards::class)
+            ->assertCanSeeTableRecords([$bandung, $cirebon])
+            ->filterTable('origin_depo', 'BANDUNG')
+            ->assertCanSeeTableRecords([$bandung])
+            ->assertCanNotSeeTableRecords([$cirebon]);
+    }
+
     private function pendingImport(string $path): RateCardImport
     {
         return RateCardImport::create([
