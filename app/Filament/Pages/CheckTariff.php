@@ -57,6 +57,11 @@ class CheckTariff extends Page
 
     public ?string $searchedDestination = null;
 
+    /**
+     * @var list<string>
+     */
+    public array $searchedDestinations = [];
+
     public ?string $searchedDistrict = null;
 
     public float $searchedWeight = 0;
@@ -92,7 +97,7 @@ class CheckTariff extends Page
 
         $this->form->fill([
             'origin' => [],
-            'destination' => null,
+            'destination' => [],
             'district' => null,
             'weight' => null,
             'service' => '',
@@ -104,6 +109,8 @@ class CheckTariff extends Page
         $this->aiInsights = null;
         $this->searchedOrigin = null;
         $this->searchedOrigins = [];
+        $this->searchedDestination = null;
+        $this->searchedDestinations = [];
         $this->searchedDistrict = null;
     }
 
@@ -113,7 +120,7 @@ class CheckTariff extends Page
             ->statePath('data')
             ->components([
                 Section::make('Form Cek Tarif')
-                    ->description('Masukkan rute pengiriman (satu atau beberapa kota asal ke kota/kecamatan tujuan), berat barang, dan nilai barang untuk membandingkan tarif seluruh ekspedisi.')
+                    ->description('Masukkan rute pengiriman (satu atau beberapa kota asal ke satu atau beberapa kota/kecamatan tujuan), berat barang, dan nilai barang untuk membandingkan tarif seluruh ekspedisi.')
                     ->schema([
                         Grid::make([
                             'default' => 1,
@@ -139,25 +146,37 @@ class CheckTariff extends Page
                                 ->afterStateUpdated(function (Get $get, Set $set, mixed $state): void {
                                     $origins = $this->normalizeOrigins($state);
                                     if ($origins === []) {
-                                        $set('destination', null);
+                                        $set('destination', []);
                                         $set('district', null);
 
                                         return;
                                     }
 
                                     $availableDestinations = $this->getDestinationOptionsForOrigins($origins);
-                                    $currentDest = (string) $get('destination');
+                                    $currentDestinations = $this->normalizeCities($get('destination'));
 
-                                    if (! empty($availableDestinations) && ! isset($availableDestinations[$currentDest])) {
-                                        $set('destination', null);
+                                    if (! empty($availableDestinations) && $currentDestinations !== []) {
+                                        $validDestinations = array_values(array_filter(
+                                            $currentDestinations,
+                                            fn (string $dest): bool => isset($availableDestinations[$dest]),
+                                        ));
+
+                                        if ($validDestinations !== $currentDestinations) {
+                                            $set('destination', $validDestinations);
+                                        }
+
+                                        $currentDestinations = $validDestinations;
+                                    }
+
+                                    if ($currentDestinations === []) {
                                         $set('district', null);
 
                                         return;
                                     }
 
                                     $currentDistrict = (string) $get('district');
-                                    if (! empty($currentDistrict) && ! empty($currentDest)) {
-                                        $availableDistricts = $this->getDistrictOptionsForOrigins($origins, $currentDest);
+                                    if (! empty($currentDistrict)) {
+                                        $availableDistricts = $this->getDistrictOptionsForRoutes($origins, $currentDestinations);
                                         if (! isset($availableDistricts[$currentDistrict])) {
                                             $set('district', null);
                                         }
@@ -168,12 +187,14 @@ class CheckTariff extends Page
 
                             Select::make('destination')
                                 ->label('Kota Tujuan')
+                                ->multiple()
                                 ->options(function (Get $get): array {
                                     $origins = $this->normalizeOrigins($get('origin'));
                                     $options = $origins !== [] ? $this->getDestinationOptionsForOrigins($origins) : [];
-                                    $current = (string) $get('destination');
-                                    if (! empty($current) && ! isset($options[$current])) {
-                                        $options[$current] = $current;
+                                    foreach ($this->normalizeCities($get('destination')) as $current) {
+                                        if (! isset($options[$current])) {
+                                            $options[$current] = $current;
+                                        }
                                     }
 
                                     return $options;
@@ -189,14 +210,15 @@ class CheckTariff extends Page
                                     }
 
                                     return count($origins) > 1
-                                        ? "Tersedia {$count} kota tujuan dari ".count($origins).' kota asal.'
-                                        : "Tersedia {$count} kota tujuan.";
+                                        ? "Tersedia {$count} kota tujuan dari ".count($origins).' kota asal (bisa pilih lebih dari 1).'
+                                        : "Tersedia {$count} kota tujuan (bisa pilih lebih dari 1).";
                                 })
                                 ->searchable()
                                 ->required()
                                 ->live()
-                                ->afterStateUpdated(function (Get $get, Set $set, ?string $state): void {
-                                    if (empty($state)) {
+                                ->afterStateUpdated(function (Get $get, Set $set, mixed $state): void {
+                                    $destinations = $this->normalizeCities($state);
+                                    if ($destinations === []) {
                                         $set('district', null);
 
                                         return;
@@ -205,21 +227,21 @@ class CheckTariff extends Page
                                     $origins = $this->normalizeOrigins($get('origin'));
                                     $currentDistrict = (string) $get('district');
                                     if (! empty($currentDistrict) && $origins !== []) {
-                                        $availableDistricts = $this->getDistrictOptionsForOrigins($origins, $state);
+                                        $availableDistricts = $this->getDistrictOptionsForRoutes($origins, $destinations);
                                         if (! isset($availableDistricts[$currentDistrict])) {
                                             $set('district', null);
                                         }
                                     }
                                 })
-                                ->placeholder('Pilih kota tujuan'),
+                                ->placeholder('Pilih satu atau beberapa kota tujuan'),
 
                             Select::make('district')
                                 ->label('Kecamatan (Opsional)')
                                 ->options(function (Get $get): array {
                                     $origins = $this->normalizeOrigins($get('origin'));
-                                    $destination = (string) $get('destination');
-                                    $options = ($origins !== [] && ! empty($destination))
-                                        ? $this->getDistrictOptionsForOrigins($origins, $destination)
+                                    $destinations = $this->normalizeCities($get('destination'));
+                                    $options = ($origins !== [] && $destinations !== [])
+                                        ? $this->getDistrictOptionsForRoutes($origins, $destinations)
                                         : [];
 
                                     $current = (string) $get('district');
@@ -237,11 +259,11 @@ class CheckTariff extends Page
                                         return [];
                                     }
 
-                                    $destination = (string) $get('destination');
+                                    $destinations = $this->normalizeCities($get('destination'));
                                     $needle = strtoupper(trim($search));
 
-                                    if (! empty($destination)) {
-                                        $options = $this->getDistrictOptionsForOrigins($origins, $destination);
+                                    if ($destinations !== []) {
+                                        $options = $this->getDistrictOptionsForRoutes($origins, $destinations);
                                         if ($needle === '') {
                                             return array_slice($options, 0, 50, true);
                                         }
@@ -266,10 +288,14 @@ class CheckTariff extends Page
                                     return str_contains($text, '||') ? explode('||', $text, 2)[1] : $text;
                                 })
                                 ->live()
-                                ->afterStateUpdated(function (?string $state, Set $set): void {
+                                ->afterStateUpdated(function (?string $state, Get $get, Set $set): void {
                                     if (! empty($state) && str_contains($state, '||')) {
                                         [$city, $dist] = explode('||', $state, 2);
-                                        $set('destination', $city);
+                                        $mergedDestinations = $this->normalizeCities([
+                                            ...$this->normalizeCities($get('destination')),
+                                            $city,
+                                        ]);
+                                        $set('destination', $mergedDestinations);
                                         $set('district', $dist);
                                     }
                                 })
@@ -279,12 +305,12 @@ class CheckTariff extends Page
                                         return 'Pilih kota asal dulu.';
                                     }
 
-                                    $destination = (string) $get('destination');
-                                    if (empty($destination)) {
+                                    $destinations = $this->normalizeCities($get('destination'));
+                                    if ($destinations === []) {
                                         return 'Ketik nama kecamatan langsung (min. 2 huruf) atau pilih kota dulu.';
                                     }
 
-                                    $count = count($this->getDistrictOptionsForOrigins($origins, $destination));
+                                    $count = count($this->getDistrictOptionsForRoutes($origins, $destinations));
 
                                     return $count > 0
                                         ? "Tersedia {$count} kecamatan (kosongkan untuk tarif kota)."
@@ -342,16 +368,16 @@ class CheckTariff extends Page
     }
 
     /**
-     * Normalisasi input kota asal (string tunggal, string dipisah koma, atau array) menjadi list unik.
+     * Normalisasi input daftar kota (string tunggal, string dipisah koma, atau array) menjadi list unik.
      *
      * @return list<string>
      */
-    public function normalizeOrigins(mixed $origins): array
+    public function normalizeCities(mixed $cities): array
     {
-        if (is_string($origins)) {
-            $items = explode(',', $origins);
-        } elseif (is_array($origins)) {
-            $items = $origins;
+        if (is_string($cities)) {
+            $items = explode(',', $cities);
+        } elseif (is_array($cities)) {
+            $items = $cities;
         } else {
             return [];
         }
@@ -369,6 +395,16 @@ class CheckTariff extends Page
         }
 
         return $normalized;
+    }
+
+    /**
+     * Normalisasi input kota asal (string tunggal, string dipisah koma, atau array) menjadi list unik.
+     *
+     * @return list<string>
+     */
+    public function normalizeOrigins(mixed $origins): array
+    {
+        return $this->normalizeCities($origins);
     }
 
     /**
@@ -434,7 +470,10 @@ class CheckTariff extends Page
      */
     public function getDistrictOptionsForRoute(?string $origin, ?string $destination): array
     {
-        return $this->getDistrictOptionsForOrigins($this->normalizeOrigins($origin), $destination);
+        return $this->getDistrictOptionsForRoutes(
+            $this->normalizeCities($origin),
+            $this->normalizeCities($destination),
+        );
     }
 
     /**
@@ -445,21 +484,35 @@ class CheckTariff extends Page
      */
     public function getDistrictOptionsForOrigins(array $origins, ?string $destination): array
     {
-        $upperOrigins = $this->normalizeOrigins($origins);
-        if ($upperOrigins === [] || empty($destination)) {
+        return $this->getDistrictOptionsForRoutes($origins, $this->normalizeCities($destination));
+    }
+
+    /**
+     * Gabungan daftar kecamatan tujuan untuk satu atau beberapa kota asal ke satu atau beberapa kota tujuan.
+     *
+     * @param  list<string>  $origins
+     * @param  list<string>  $destinations
+     * @return array<string, string>
+     */
+    public function getDistrictOptionsForRoutes(array $origins, array $destinations): array
+    {
+        $upperOrigins = $this->normalizeCities($origins);
+        $upperDestinations = $this->normalizeCities($destinations);
+        if ($upperOrigins === [] || $upperDestinations === []) {
             return [];
         }
 
         $sortedOrigins = $upperOrigins;
         sort($sortedOrigins);
-        $upperDest = strtoupper(trim($destination));
+        $sortedDestinations = $upperDestinations;
+        sort($sortedDestinations);
         $version = ExpeditionRateCard::routeCacheVersion();
-        $cacheKey = "rate_cards:districts:v{$version}:".md5(implode('|', $sortedOrigins).'|'.$upperDest);
+        $cacheKey = "rate_cards:districts:v{$version}:".md5(implode('|', $sortedOrigins).'::'.implode('|', $sortedDestinations));
 
-        $rateCardDistricts = Cache::remember($cacheKey, 3600, function () use ($sortedOrigins, $upperDest): array {
+        $rateCardDistricts = Cache::remember($cacheKey, 3600, function () use ($sortedOrigins, $sortedDestinations): array {
             return ExpeditionRateCard::where('is_active', true)
                 ->whereIn('origin_depo', $sortedOrigins)
-                ->where('destination_city', $upperDest)
+                ->whereIn('destination_city', $sortedDestinations)
                 ->whereNotNull('destination_district')
                 ->where('destination_district', '!=', '')
                 ->whereRaw('UPPER(TRIM(destination_district)) != UPPER(TRIM(destination_city))')
@@ -477,8 +530,10 @@ class CheckTariff extends Page
         $service = app(FreightRateGoogleSheetService::class);
         $merged = [];
         foreach ($sortedOrigins as $orig) {
-            foreach ($service->getDistrictOptions($orig, $destination) as $key => $label) {
-                $merged[$key] = $label;
+            foreach ($sortedDestinations as $dest) {
+                foreach ($service->getDistrictOptions($orig, $dest) as $key => $label) {
+                    $merged[$key] = $label;
+                }
             }
         }
         ksort($merged);
@@ -736,12 +791,12 @@ class CheckTariff extends Page
         $formData = $this->form->getState();
 
         $origins = $this->normalizeOrigins($formData['origin'] ?? []);
-        $destination = (string) ($formData['destination'] ?? '');
+        $destinations = $this->normalizeCities($formData['destination'] ?? []);
         $district = ! empty($formData['district']) ? trim((string) $formData['district']) : null;
         if ($district !== null && str_contains($district, '||')) {
             [$resolvedCity, $resolvedDistrict] = explode('||', $district, 2);
-            if ($destination === '') {
-                $destination = $resolvedCity;
+            if ($destinations === []) {
+                $destinations = $this->normalizeCities($resolvedCity);
             }
             $district = $resolvedDistrict;
         }
@@ -752,25 +807,27 @@ class CheckTariff extends Page
         $itemType = ! empty($formData['item_type']) ? (string) $formData['item_type'] : null;
         $destinationAddress = ! empty($formData['destination_address']) ? (string) $formData['destination_address'] : null;
 
-        if ($origins === [] || (empty($destination) && empty($district)) || $weight <= 0) {
+        if ($origins === [] || ($destinations === [] && empty($district)) || $weight <= 0) {
             Notification::make()
                 ->title('Peringatan')
-                ->body('Silakan pilih minimal satu kota asal, kota/kecamatan tujuan, dan isi berat barang yang valid.')
+                ->body('Silakan pilih minimal satu kota asal, minimal satu kota/kecamatan tujuan, dan isi berat barang yang valid.')
                 ->warning()
                 ->send();
 
             return;
         }
 
-        if (empty($destination) && ! empty($district)) {
-            $destination = $district;
+        if ($destinations === [] && ! empty($district)) {
+            $destinations = $this->normalizeCities($district);
         }
 
         $originLabel = implode(', ', $origins);
+        $destinationLabel = implode(', ', $destinations);
 
         $this->searchedOrigin = $originLabel;
         $this->searchedOrigins = $origins;
-        $this->searchedDestination = $destination;
+        $this->searchedDestination = $destinationLabel;
+        $this->searchedDestinations = $destinations;
         $this->searchedDistrict = $district;
         $this->searchedWeight = $weight;
         $this->searchedService = $selectedService;
@@ -781,22 +838,24 @@ class CheckTariff extends Page
 
         $allEnrichedRates = [];
         foreach ($origins as $orig) {
-            // 1. Prioritaskan data master Tarif Kontrak (ExpeditionRateCard) di database
-            $rawRates = $this->queryMasterRateCards($orig, $destination, $weight, $selectedService, $district);
+            foreach ($destinations as $dest) {
+                // 1. Prioritaskan data master Tarif Kontrak (ExpeditionRateCard) di database
+                $rawRates = $this->queryMasterRateCards($orig, $dest, $weight, $selectedService, $district);
 
-            // 2. Jika tidak ada di master database, cek data contoh screenshot (MANADO -> PALEMBANG)
-            if (empty($rawRates) && strtoupper($orig) === 'MANADO' && strtoupper($destination) === 'PALEMBANG') {
-                $rawRates = $this->getManadoPalembangScreenshotRates($weight, $selectedService);
-            }
+                // 2. Jika tidak ada di master database, cek data contoh screenshot (MANADO -> PALEMBANG)
+                if (empty($rawRates) && strtoupper($orig) === 'MANADO' && strtoupper($dest) === 'PALEMBANG') {
+                    $rawRates = $this->getManadoPalembangScreenshotRates($weight, $selectedService);
+                }
 
-            // 3. Jika masih tidak ada di master database, fallback ke Google Sheets cache
-            if (empty($rawRates)) {
-                $rawRates = $service->compareRates($orig, $destination, $weight, $selectedService, 10, $district);
-            }
+                // 3. Jika masih tidak ada di master database, fallback ke Google Sheets cache
+                if (empty($rawRates)) {
+                    $rawRates = $service->compareRates($orig, $dest, $weight, $selectedService, 10, $district);
+                }
 
-            $enrichedForOrigin = $this->enrichRatesWithInsuranceAndTotals($rawRates, $weight, $totalAmount, $orig, $destination, $selectedService);
-            foreach ($enrichedForOrigin as $item) {
-                $allEnrichedRates[] = $item;
+                $enrichedForRoute = $this->enrichRatesWithInsuranceAndTotals($rawRates, $weight, $totalAmount, $orig, $dest, $selectedService);
+                foreach ($enrichedForRoute as $item) {
+                    $allEnrichedRates[] = $item;
+                }
             }
         }
 
@@ -812,11 +871,11 @@ class CheckTariff extends Page
         $this->hasSearched = true;
         $this->showHistory = false;
 
-        $this->aiInsights = $this->generateAiInsights($this->rates, $totalAmount, $originLabel, $destination);
+        $this->aiInsights = $this->generateAiInsights($this->rates, $totalAmount, $originLabel, $destinationLabel);
 
         $this->recordSearchHistory(
             $originLabel,
-            $destination,
+            $destinationLabel,
             $district,
             $weight,
             $selectedService,
@@ -835,7 +894,7 @@ class CheckTariff extends Page
     {
         $this->form->fill([
             'origin' => ['MANADO'],
-            'destination' => 'PALEMBANG',
+            'destination' => ['PALEMBANG'],
             'weight' => 26,
             'service' => '',
             'total_amount' => 59040000,
@@ -977,6 +1036,7 @@ class CheckTariff extends Page
 
             $enriched[] = [
                 'origin' => (string) ($r['origin'] ?? $origin),
+                'destination' => (string) ($r['destination'] ?? $destination),
                 'expedition' => $exp,
                 'service' => $srv,
                 'display_name' => "{$exp} ({$srv})",
@@ -1096,11 +1156,25 @@ class CheckTariff extends Page
         $fastest ??= $cheapest;
 
         $isMultiOrigin = count($this->searchedOrigins) > 1;
-        $formatLabel = static function (array $rate) use ($isMultiOrigin): string {
+        $isMultiDestination = count($this->searchedDestinations) > 1;
+        $formatLabel = static function (array $rate) use ($isMultiOrigin, $isMultiDestination): string {
             $label = (string) ($rate['display_name'] ?? '');
             $rateOrigin = (string) ($rate['origin'] ?? '');
+            $rateDest = (string) ($rate['destination'] ?? '');
 
-            return ($isMultiOrigin && $rateOrigin !== '') ? "{$label} [{$rateOrigin}]" : $label;
+            if ($isMultiOrigin && $isMultiDestination && $rateOrigin !== '' && $rateDest !== '') {
+                return "{$label} [{$rateOrigin} -> {$rateDest}]";
+            }
+
+            if ($isMultiOrigin && $rateOrigin !== '') {
+                return "{$label} [{$rateOrigin}]";
+            }
+
+            if ($isMultiDestination && $rateDest !== '') {
+                return "{$label} [-> {$rateDest}]";
+            }
+
+            return $label;
         };
 
         // Deteksi perangkap asuransi (ongkir/kg murah tapi total bengkak karena asuransi)
@@ -1133,11 +1207,25 @@ class CheckTariff extends Page
     protected function buildWhatsAppReport(array $rates, array $cheapest, array $fastest, array $warnings, string $origin, string $destination, float $totalAmount): string
     {
         $isMultiOrigin = count($this->searchedOrigins) > 1;
-        $formatLabel = static function (array $rate) use ($isMultiOrigin): string {
+        $isMultiDestination = count($this->searchedDestinations) > 1;
+        $formatLabel = static function (array $rate) use ($isMultiOrigin, $isMultiDestination): string {
             $label = (string) ($rate['display_name'] ?? '');
             $rateOrigin = (string) ($rate['origin'] ?? '');
+            $rateDest = (string) ($rate['destination'] ?? '');
 
-            return ($isMultiOrigin && $rateOrigin !== '') ? "{$label} [{$rateOrigin}]" : $label;
+            if ($isMultiOrigin && $isMultiDestination && $rateOrigin !== '' && $rateDest !== '') {
+                return "{$label} [{$rateOrigin} -> {$rateDest}]";
+            }
+
+            if ($isMultiOrigin && $rateOrigin !== '') {
+                return "{$label} [{$rateOrigin}]";
+            }
+
+            if ($isMultiDestination && $rateDest !== '') {
+                return "{$label} [-> {$rateDest}]";
+            }
+
+            return $label;
         };
 
         $lines = [];
@@ -1226,13 +1314,14 @@ class CheckTariff extends Page
         ?string $destinationAddress = null
     ): void {
         $storedOrigin = Str::limit($origin, 100, '...');
+        $storedDestination = Str::limit($destination, 100, '...');
         $cheapest = ! empty($rates) ? $rates[0] : null;
         $userId = auth()->id();
 
         $recent = TariffSearchHistory::query()
             ->when($userId, fn ($q) => $q->where('user_id', $userId))
             ->where('origin', $storedOrigin)
-            ->where('destination', $destination)
+            ->where('destination', $storedDestination)
             ->where('district', $district)
             ->where('weight', $weight)
             ->where('service', $service)
@@ -1241,6 +1330,7 @@ class CheckTariff extends Page
 
         $ratesSummary = array_map(fn ($r) => [
             'origin' => (string) ($r['origin'] ?? $storedOrigin),
+            'destination' => (string) ($r['destination'] ?? $storedDestination),
             'expedition' => (string) $r['expedition'],
             'service' => (string) $r['service'],
             'rate_per_kg' => (float) ($r['rate_per_kg'] ?? 0),
@@ -1277,7 +1367,7 @@ class CheckTariff extends Page
             TariffSearchHistory::create(array_merge($payload, [
                 'user_id' => $userId,
                 'origin' => $storedOrigin,
-                'destination' => $destination,
+                'destination' => $storedDestination,
                 'district' => $district,
                 'weight' => $weight,
                 'service' => $service,
@@ -1315,9 +1405,15 @@ class CheckTariff extends Page
         }
         $historyOriginLabel = $historyOrigins !== [] ? implode(', ', $historyOrigins) : (string) $history->origin;
 
+        $historyDestinations = $this->normalizeCities(array_column($savedRates, 'destination'));
+        if ($historyDestinations === []) {
+            $historyDestinations = $this->normalizeCities($history->destination);
+        }
+        $historyDestinationLabel = $historyDestinations !== [] ? implode(', ', $historyDestinations) : (string) $history->destination;
+
         $this->form->fill([
             'origin' => $historyOrigins,
-            'destination' => $history->destination,
+            'destination' => $historyDestinations,
             'district' => $history->district,
             'weight' => $history->weight,
             'service' => $history->service ?? '',
@@ -1328,7 +1424,8 @@ class CheckTariff extends Page
             $this->rates = $savedRates;
             $this->searchedOrigin = $historyOriginLabel;
             $this->searchedOrigins = $historyOrigins;
-            $this->searchedDestination = $history->destination;
+            $this->searchedDestination = $historyDestinationLabel;
+            $this->searchedDestinations = $historyDestinations;
             $this->searchedDistrict = $history->district;
             $this->searchedWeight = (float) $history->weight;
             $this->searchedService = $history->service;
@@ -1341,6 +1438,7 @@ class CheckTariff extends Page
             $this->rates = [
                 [
                     'origin' => $historyOrigins[0] ?? (string) $history->origin,
+                    'destination' => $historyDestinations[0] ?? (string) $history->destination,
                     'expedition' => $history->cheapest_expedition,
                     'service' => $history->service ?: 'DARAT',
                     'display_name' => "{$history->cheapest_expedition} (".($history->service ?: 'DARAT').')',
@@ -1360,7 +1458,8 @@ class CheckTariff extends Page
             ];
             $this->searchedOrigin = $historyOriginLabel;
             $this->searchedOrigins = $historyOrigins;
-            $this->searchedDestination = $history->destination;
+            $this->searchedDestination = $historyDestinationLabel;
+            $this->searchedDestinations = $historyDestinations;
             $this->searchedDistrict = $history->district;
             $this->searchedWeight = $w;
             $this->searchedService = $history->service;
@@ -1405,7 +1504,7 @@ class CheckTariff extends Page
     {
         $this->form->fill([
             'origin' => [],
-            'destination' => null,
+            'destination' => [],
             'district' => null,
             'weight' => null,
             'service' => '',
@@ -1418,6 +1517,7 @@ class CheckTariff extends Page
         $this->searchedOrigin = null;
         $this->searchedOrigins = [];
         $this->searchedDestination = null;
+        $this->searchedDestinations = [];
         $this->searchedDistrict = null;
         $this->searchedWeight = 0;
         $this->searchedService = null;
@@ -1430,12 +1530,13 @@ class CheckTariff extends Page
 
     /**
      * @param  string|list<string>  $origin
+     * @param  string|list<string>  $destination
      */
-    public function setRoute(string|array $origin, string $destination, float $weight = 5, string $service = '', ?string $district = null): void
+    public function setRoute(string|array $origin, string|array $destination, float $weight = 5, string $service = '', ?string $district = null): void
     {
         $this->form->fill([
             'origin' => $this->normalizeOrigins($origin),
-            'destination' => $destination,
+            'destination' => $this->normalizeCities($destination),
             'district' => $district,
             'weight' => $weight,
             'service' => $service,

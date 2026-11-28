@@ -49,7 +49,7 @@ class TariffSearchHistory extends Model
     }
 
     /**
-     * @return array<int, array{expedition: string, service: string, total_cost: float|int}>
+     * @return array<int, array{origin?: string, destination?: string, expedition: string, service: string, total_cost: float|int}>
      */
     public function getRatesList(): array
     {
@@ -61,17 +61,21 @@ class TariffSearchHistory extends Model
             /** @var FreightRateGoogleSheetService $service */
             $service = app(FreightRateGoogleSheetService::class);
             $origins = array_values(array_filter(array_map('trim', explode(',', (string) $this->origin))));
+            $destinations = array_values(array_filter(array_map('trim', explode(',', (string) $this->destination))));
             $summary = [];
 
             foreach ($origins as $origin) {
-                $rates = $service->compareRates($origin, $this->destination, $this->weight, $this->service);
-                foreach ($rates as $r) {
-                    $summary[] = [
-                        'origin' => $origin,
-                        'expedition' => (string) $r['expedition'],
-                        'service' => (string) $r['service'],
-                        'total_cost' => $r['total_cost'],
-                    ];
+                foreach ($destinations as $destination) {
+                    $rates = $service->compareRates($origin, $destination, $this->weight, $this->service);
+                    foreach ($rates as $r) {
+                        $summary[] = [
+                            'origin' => $origin,
+                            'destination' => $destination,
+                            'expedition' => (string) $r['expedition'],
+                            'service' => (string) $r['service'],
+                            'total_cost' => $r['total_cost'],
+                        ];
+                    }
                 }
             }
 
