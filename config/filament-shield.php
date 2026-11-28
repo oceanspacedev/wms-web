@@ -258,6 +258,9 @@ return [
         'view_api_docs',
         'impersonate_user',
         'reset_data_pengiriman',
+        'view_any:rate_card_import' => 'Lihat Riwayat Import Tarif Kontrak',
+        'create:rate_card_import' => 'Import Excel Tarif Kontrak',
+        'delete:rate_card_import' => 'Hapus Riwayat Import Tarif Kontrak',
     ],
 
     /*

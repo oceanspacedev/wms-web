@@ -182,6 +182,21 @@ class ExpeditionRateCardResource extends Resource
                             ->pluck('origin_depo', 'origin_depo')
                             ->all(),
                     )),
+                SelectFilter::make('destination_city')
+                    ->label('Kota Tujuan')
+                    ->placeholder('Semua kota tujuan')
+                    ->searchable()
+                    ->options(fn (): array => Cache::remember(
+                        'rate_cards:filter_destinations:v'.ExpeditionRateCard::routeCacheVersion(),
+                        3600,
+                        fn (): array => ExpeditionRateCard::query()
+                            ->whereNotNull('destination_city')
+                            ->where('destination_city', '!=', '')
+                            ->distinct()
+                            ->orderBy('destination_city')
+                            ->pluck('destination_city', 'destination_city')
+                            ->all(),
+                    )),
                 SelectFilter::make('service_type')
                     ->label('Layanan')
                     ->options([

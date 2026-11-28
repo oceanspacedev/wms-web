@@ -107,19 +107,16 @@ class ExpeditionRateCard extends Model
 
     /**
      * Hitung ongkir baku berdasarkan jenis tarif: per_kg dikali max(berat, min_kg minimal 1 kg),
-     * sedangkan flat/koli/kubikasi/dokumen memakai nilai tarif utuh.
+     * sedangkan flat/koli/kubikasi/dokumen memakai nilai tarif utuh; hasilnya dikalikan qty pengiriman.
      */
-    public function calculateShippingCost(float $weight): float
+    public function calculateShippingCost(float $weight, int $qty = 1): float
     {
         $rate = (float) $this->rate_per_kg;
+        $baseCost = $this->isFlatPricing()
+            ? $rate
+            : max($weight, max(1.0, (float) $this->min_kg)) * $rate;
 
-        if ($this->isFlatPricing()) {
-            return $rate;
-        }
-
-        $minKg = max(1.0, (float) $this->min_kg);
-
-        return max($weight, $minKg) * $rate;
+        return $baseCost * max(1, $qty);
     }
 
     public function pricingLabel(): string

@@ -5,6 +5,7 @@ namespace App\Filament\Resources\ExpeditionRateCards\Pages;
 use App\Filament\Resources\ExpeditionRateCards\ExpeditionRateCardResource;
 use App\Filament\Resources\ExpeditionRateCards\Widgets\RateCardImportsWidget;
 use App\Jobs\ProcessRateCardImportJob;
+use App\Models\ExpeditionRateCard;
 use App\Models\RateCardImport;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
@@ -31,7 +32,9 @@ class ManageExpeditionRateCards extends ManageRecords
                 ->label('Riwayat Import')
                 ->icon(null)
                 ->color('gray')
-                ->visible(fn (): bool => (auth()->user()?->can('viewAny', RateCardImport::class) ?? false) && RateCardImport::query()->exists())
+                ->visible(fn (): bool => ((auth()->user()?->can('viewAny', RateCardImport::class) ?? false)
+                    || (auth()->user()?->can('viewAny', ExpeditionRateCard::class) ?? false))
+                    && RateCardImport::query()->exists())
                 ->badge(fn (): ?int => RateCardImport::query()->whereIn('status', ['pending', 'processing'])->count() ?: null)
                 ->badgeColor('warning')
                 ->modalHeading('Riwayat Import')
@@ -47,7 +50,8 @@ class ManageExpeditionRateCards extends ManageRecords
                 ->label('Import Excel / Spreadsheet')
                 ->icon(null)
                 ->color('success')
-                ->visible(fn (): bool => auth()->user()?->can('create', RateCardImport::class) ?? false)
+                ->visible(fn (): bool => (auth()->user()?->can('create', RateCardImport::class) ?? false)
+                    || (auth()->user()?->can('create', ExpeditionRateCard::class) ?? false))
                 ->modalHeading('Import Tarif Kontrak (Rate Cards)')
                 ->modalSubmitActionLabel('Upload')
                 ->modalWidth('lg')
