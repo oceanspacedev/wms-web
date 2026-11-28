@@ -66,6 +66,8 @@ class CheckTariff extends Page
 
     public float $searchedWeight = 0;
 
+    public ?int $searchedQty = null;
+
     public ?string $searchedService = null;
 
     public ?float $searchedTotalAmount = null;
@@ -100,6 +102,7 @@ class CheckTariff extends Page
             'destination' => [],
             'district' => null,
             'weight' => null,
+            'qty' => null,
             'service' => '',
             'total_amount' => null,
         ]);
@@ -112,6 +115,8 @@ class CheckTariff extends Page
         $this->searchedDestination = null;
         $this->searchedDestinations = [];
         $this->searchedDistrict = null;
+        $this->searchedWeight = 0;
+        $this->searchedQty = null;
     }
 
     public function form(Schema $schema): Schema
@@ -120,7 +125,7 @@ class CheckTariff extends Page
             ->statePath('data')
             ->components([
                 Section::make('Form Cek Tarif')
-                    ->description('Masukkan rute pengiriman (satu atau beberapa kota asal ke satu atau beberapa kota/kecamatan tujuan), berat barang, dan nilai barang untuk membandingkan tarif seluruh ekspedisi.')
+                    ->description('Masukkan rute pengiriman (satu atau beberapa kota asal ke satu atau beberapa kota/kecamatan tujuan), berat barang, qty, dan nilai barang untuk membandingkan tarif seluruh ekspedisi.')
                     ->schema([
                         Grid::make([
                             'default' => 1,
@@ -317,7 +322,13 @@ class CheckTariff extends Page
                                         : 'Belum ada rincian kecamatan; cek memakai tarif kota.';
                                 })
                                 ->placeholder('Semua / Tarif Kota'),
+                        ]),
 
+                        Grid::make([
+                            'default' => 1,
+                            'sm' => 2,
+                            'lg' => 4,
+                        ])->schema([
                             TextInput::make('weight')
                                 ->label('Berat Barang')
                                 ->numeric()
@@ -325,7 +336,15 @@ class CheckTariff extends Page
                                 ->minValue(0.1)
                                 ->step(0.1)
                                 ->placeholder('Contoh: 26')
-                                ->suffix('KG'),
+                                ->suffix('KG')
+                                ->helperText('Berat per paket/kiriman (KG).'),
+
+                            TextInput::make('qty')
+                                ->label('Qty')
+                                ->integer()
+                                ->minValue(1)
+                                ->placeholder('Opsional (cth: 1)')
+                                ->helperText('Opsional. Mengalikan Biaya Ongkir semua ekspedisi (Ongkir × Qty).'),
 
                             TextInput::make('total_amount')
                                 ->label('Nilai Barang (Amount)')
@@ -627,7 +646,7 @@ class CheckTariff extends Page
      *
      * @return array<int, array<string, mixed>>
      */
-    protected function queryMasterRateCards(string $origin, string $destination, float $weight, ?string $selectedService, ?string $selectedDistrict = null): array
+    protected function queryMasterRateCards(string $origin, string $destination, float $weight, ?string $selectedService, ?string $selectedDistrict = null, int $qty = 1): array
     {
         $orig = strtoupper(trim($origin));
         $dest = strtoupper(trim($destination));
@@ -738,7 +757,7 @@ class CheckTariff extends Page
             $minKgVal = (float) $rc->min_kg;
             $isFlat = $rc->isFlatPricing();
             $rate = (float) $rc->rate_per_kg;
-            $totalCost = $rc->calculateShippingCost($weight);
+            $totalCost = $rc->calculateShippingCost($weight, $qty);
 
             $key = $expName.'|'.$srv;
             $isBetterPriority = ! isset($grouped[$key]) || $priority > $grouped[$key]['_priority'];
@@ -801,6 +820,8 @@ class CheckTariff extends Page
             $district = $resolvedDistrict;
         }
         $weight = (float) ($formData['weight'] ?? 0);
+        $qty = filled($formData['qty'] ?? null) ? max(1, (int) $formData['qty']) : null;
+        $effectiveQty = $qty ?? 1;
         $selectedService = ! empty($formData['service']) ? (string) $formData['service'] : null;
         $totalAmount = ! empty($formData['total_amount']) ? (float) $formData['total_amount'] : 0.0;
         $storeName = ! empty($formData['store_name']) ? (string) $formData['store_name'] : null;
@@ -830,6 +851,7 @@ class CheckTariff extends Page
         $this->searchedDestinations = $destinations;
         $this->searchedDistrict = $district;
         $this->searchedWeight = $weight;
+        $this->searchedQty = $qty;
         $this->searchedService = $selectedService;
         $this->searchedTotalAmount = $totalAmount > 0 ? $totalAmount : null;
         $this->searchedStoreName = $storeName;
@@ -840,7 +862,7 @@ class CheckTariff extends Page
         foreach ($origins as $orig) {
             foreach ($destinations as $dest) {
                 // 1. Prioritaskan data master Tarif Kontrak (ExpeditionRateCard) di database
-                $rawRates = $this->queryMasterRateCards($orig, $dest, $weight, $selectedService, $district);
+                $rawRates = $this->queryMasterRateCards($orig, $dest, $weight, $selectedService, $district, $effectiveQty);
 
                 // 2. Jika tidak ada di master database, cek data contoh screenshot (MANADO -> PALEMBANG)
                 if (empty($rawRates) && strtoupper($orig) === 'MANADO' && strtoupper($dest) === 'PALEMBANG') {
@@ -852,7 +874,7 @@ class CheckTariff extends Page
                     $rawRates = $service->compareRates($orig, $dest, $weight, $selectedService, 10, $district);
                 }
 
-                $enrichedForRoute = $this->enrichRatesWithInsuranceAndTotals($rawRates, $weight, $totalAmount, $orig, $dest, $selectedService);
+                $enrichedForRoute = $this->enrichRatesWithInsuranceAndTotals($rawRates, $weight, $totalAmount, $orig, $dest, $selectedService, $effectiveQty);
                 foreach ($enrichedForRoute as $item) {
                     $allEnrichedRates[] = $item;
                 }
@@ -883,7 +905,8 @@ class CheckTariff extends Page
             $totalAmount,
             $storeName,
             $itemType,
-            $destinationAddress
+            $destinationAddress,
+            $qty
         );
     }
 
@@ -896,6 +919,7 @@ class CheckTariff extends Page
             'origin' => ['MANADO'],
             'destination' => ['PALEMBANG'],
             'weight' => 26,
+            'qty' => null,
             'service' => '',
             'total_amount' => 59040000,
             'store_name' => 'DEPO PALEMBANG',
@@ -1001,10 +1025,12 @@ class CheckTariff extends Page
         float $totalAmount,
         string $origin = '',
         string $destination = '',
-        ?string $selectedService = null
+        ?string $selectedService = null,
+        int $qty = 1
     ): array {
         $enriched = [];
         $isAirRealistic = $this->isAirServiceRealistic($origin, $destination);
+        $effectiveQty = max(1, $qty);
 
         foreach ($rawRates as $r) {
             $exp = (string) $r['expedition'];
@@ -1019,8 +1045,15 @@ class CheckTariff extends Page
             $isFlat = ! empty($r['is_flat']);
             $minKgVal = isset($r['min_kg_val']) ? (float) $r['min_kg_val'] : 1.0;
 
+            $pricingType = (string) ($r['pricing_type'] ?? ($isFlat ? ExpeditionRateCard::PRICING_FLAT : ExpeditionRateCard::PRICING_PER_KG));
+            if ($pricingType === ExpeditionRateCard::PRICING_FLAT && strtoupper(trim((string) ($r['min_kg'] ?? ''))) === '/COLLY') {
+                $pricingType = ExpeditionRateCard::PRICING_PER_COLLY;
+            }
+            $pricingBadge = (string) ($r['pricing_badge'] ?? (ExpeditionRateCard::PRICING_BADGES[$pricingType] ?? '/KG'));
+
             $chargeableWeight = max($weight, $minKgVal > 0 ? $minKgVal : 1.0);
-            $biayaOngkir = $isFlat ? $ratePerKg : ($chargeableWeight * $ratePerKg);
+            $baseOngkir = $isFlat ? $ratePerKg : ($chargeableWeight * $ratePerKg);
+            $biayaOngkir = $baseOngkir * $effectiveQty;
 
             $insPercent = isset($r['insurance_percent'])
                 ? (float) $r['insurance_percent']
@@ -1031,8 +1064,6 @@ class CheckTariff extends Page
             $pctAmount = $totalAmount > 0 ? round(($totalCost / $totalAmount) * 100, 1) : 0.0;
 
             $minKgLabel = $isFlat ? '–' : ($minKgVal > 0 ? (string) round($minKgVal) : '1');
-            $pricingType = (string) ($r['pricing_type'] ?? ($isFlat ? ExpeditionRateCard::PRICING_FLAT : ExpeditionRateCard::PRICING_PER_KG));
-            $pricingBadge = (string) ($r['pricing_badge'] ?? (ExpeditionRateCard::PRICING_BADGES[$pricingType] ?? '/KG'));
 
             $enriched[] = [
                 'origin' => (string) ($r['origin'] ?? $origin),
@@ -1047,6 +1078,7 @@ class CheckTariff extends Page
                 'pricing_badge' => $pricingBadge,
                 'insurance_percent' => $insPercent,
                 'biaya_asuransi' => $biayaAsuransi,
+                'base_ongkir' => $baseOngkir,
                 'biaya_ongkir' => $biayaOngkir,
                 'total_cost' => $totalCost,
                 'percent_dari_amount' => $pctAmount,
@@ -1242,6 +1274,10 @@ class CheckTariff extends Page
 
         $lines[] = '*Total Berat:* '.$this->searchedWeight.' KG';
 
+        if (! empty($this->searchedQty)) {
+            $lines[] = '*Qty:* '.$this->searchedQty;
+        }
+
         if (! empty($this->searchedItemType)) {
             $lines[] = '*Jenis Barang:* '.$this->searchedItemType;
         }
@@ -1260,13 +1296,24 @@ class CheckTariff extends Page
 
         $fastestLabel = $formatLabel($fastest);
         $cheapestLabel = $formatLabel($cheapest);
+        $effectiveQty = max(1, (int) ($this->searchedQty ?? 1));
 
         foreach ($rates as $idx => $r) {
             $num = $idx + 1;
             $rowLabel = $formatLabel($r);
             $star = ($idx === 0) ? ' ⭐ *TERMURAH*' : (($rowLabel === $fastestLabel && $idx !== 0) ? ' ⚡ *TERCEPAT*' : '');
             $lines[] = "{$num}. *{$rowLabel}*{$star}";
-            $lines[] = '   • Ongkir/KG: Rp '.number_format($r['rate_per_kg'], 0, ',', '.').($r['min_kg'] > 0 ? " (Min. {$r['min_kg']} KG)" : '').' = Rp '.number_format($r['biaya_ongkir'], 0, ',', '.');
+            $baseOngkir = (float) ($r['base_ongkir'] ?? ($r['biaya_ongkir'] / $effectiveQty));
+            $qtySuffix = $effectiveQty > 1 ? " × {$effectiveQty} Qty" : '';
+
+            if (! empty($r['is_flat'])) {
+                $badge = (string) ($r['pricing_badge'] ?? 'Flat');
+                $lines[] = "   • Ongkir ({$badge}): Rp ".number_format($baseOngkir, 0, ',', '.').$qtySuffix.' = Rp '.number_format($r['biaya_ongkir'], 0, ',', '.');
+            } else {
+                $minKgPart = $r['min_kg'] > 0 ? " (Min. {$r['min_kg']} KG)" : '';
+                $basePart = $effectiveQty > 1 ? ' = Rp '.number_format($baseOngkir, 0, ',', '.').$qtySuffix : '';
+                $lines[] = '   • Ongkir/KG: Rp '.number_format($r['rate_per_kg'], 0, ',', '.').$minKgPart.$basePart.' = Rp '.number_format($r['biaya_ongkir'], 0, ',', '.');
+            }
 
             if ($totalAmount > 0) {
                 $lines[] = '   • Asuransi ('.number_format($r['insurance_percent'], 1, ',', '.').'%): Rp '.number_format($r['biaya_asuransi'], 0, ',', '.');
@@ -1311,7 +1358,8 @@ class CheckTariff extends Page
         float $totalAmount = 0.0,
         ?string $storeName = null,
         ?string $itemType = null,
-        ?string $destinationAddress = null
+        ?string $destinationAddress = null,
+        ?int $qty = null
     ): void {
         $storedOrigin = Str::limit($origin, 100, '...');
         $storedDestination = Str::limit($destination, 100, '...');
@@ -1324,6 +1372,7 @@ class CheckTariff extends Page
             ->where('destination', $storedDestination)
             ->where('district', $district)
             ->where('weight', $weight)
+            ->where('qty', $qty)
             ->where('service', $service)
             ->where('created_at', '>=', now()->subMinutes(10))
             ->first();
@@ -1333,10 +1382,14 @@ class CheckTariff extends Page
             'destination' => (string) ($r['destination'] ?? $storedDestination),
             'expedition' => (string) $r['expedition'],
             'service' => (string) $r['service'],
+            'pricing_type' => (string) ($r['pricing_type'] ?? ExpeditionRateCard::PRICING_PER_KG),
+            'pricing_badge' => (string) ($r['pricing_badge'] ?? '/KG'),
+            'is_flat' => ! empty($r['is_flat']),
             'rate_per_kg' => (float) ($r['rate_per_kg'] ?? 0),
             'min_kg' => (string) ($r['min_kg'] ?? '0'),
             'insurance_percent' => (float) ($r['insurance_percent'] ?? 0),
             'biaya_asuransi' => (float) ($r['biaya_asuransi'] ?? 0),
+            'base_ongkir' => (float) ($r['base_ongkir'] ?? $r['biaya_ongkir'] ?? 0),
             'biaya_ongkir' => (float) ($r['biaya_ongkir'] ?? 0),
             'total_cost' => (float) ($r['total_cost'] ?? 0),
             'percent_dari_amount' => (float) ($r['percent_dari_amount'] ?? 0),
@@ -1351,6 +1404,7 @@ class CheckTariff extends Page
         }
 
         $payload = [
+            'qty' => $qty,
             'total_results' => count($rates),
             'cheapest_expedition' => $cheapestExpedition,
             'cheapest_cost' => $cheapest['total_cost'] ?? null,
@@ -1416,9 +1470,12 @@ class CheckTariff extends Page
             'destination' => $historyDestinations,
             'district' => $history->district,
             'weight' => $history->weight,
+            'qty' => $history->qty,
             'service' => $history->service ?? '',
             'total_amount' => $history->total_amount,
         ]);
+
+        $historyQty = $history->qty ? (int) $history->qty : null;
 
         if (! empty($savedRates)) {
             $this->rates = $savedRates;
@@ -1428,6 +1485,7 @@ class CheckTariff extends Page
             $this->searchedDestinations = $historyDestinations;
             $this->searchedDistrict = $history->district;
             $this->searchedWeight = (float) $history->weight;
+            $this->searchedQty = $historyQty;
             $this->searchedService = $history->service;
             $this->searchedTotalAmount = $history->total_amount ? (float) $history->total_amount : null;
             $this->hasSearched = true;
@@ -1435,6 +1493,7 @@ class CheckTariff extends Page
         } elseif (! empty($history->cheapest_expedition) && ! empty($history->cheapest_cost)) {
             $cost = (float) $history->cheapest_cost;
             $w = (float) ($history->weight ?: 1);
+            $effectiveQty = max(1, (int) ($historyQty ?? 1));
             $this->rates = [
                 [
                     'origin' => $historyOrigins[0] ?? (string) $history->origin,
@@ -1442,11 +1501,12 @@ class CheckTariff extends Page
                     'expedition' => $history->cheapest_expedition,
                     'service' => $history->service ?: 'DARAT',
                     'display_name' => "{$history->cheapest_expedition} (".($history->service ?: 'DARAT').')',
-                    'rate_per_kg' => round($cost / $w),
+                    'rate_per_kg' => round($cost / ($w * $effectiveQty)),
                     'min_kg' => '1',
                     'min_kg_val' => 1.0,
                     'insurance_percent' => 0.2,
                     'biaya_asuransi' => 0.0,
+                    'base_ongkir' => $cost / $effectiveQty,
                     'biaya_ongkir' => $cost,
                     'total_cost' => $cost,
                     'percent_dari_amount' => 0.0,
@@ -1462,6 +1522,7 @@ class CheckTariff extends Page
             $this->searchedDestinations = $historyDestinations;
             $this->searchedDistrict = $history->district;
             $this->searchedWeight = $w;
+            $this->searchedQty = $historyQty;
             $this->searchedService = $history->service;
             $this->searchedTotalAmount = $history->total_amount ? (float) $history->total_amount : null;
             $this->hasSearched = true;
@@ -1507,6 +1568,7 @@ class CheckTariff extends Page
             'destination' => [],
             'district' => null,
             'weight' => null,
+            'qty' => null,
             'service' => '',
             'total_amount' => null,
         ]);
@@ -1520,6 +1582,7 @@ class CheckTariff extends Page
         $this->searchedDestinations = [];
         $this->searchedDistrict = null;
         $this->searchedWeight = 0;
+        $this->searchedQty = null;
         $this->searchedService = null;
         $this->searchedTotalAmount = null;
         $this->searchedStoreName = null;
@@ -1532,13 +1595,14 @@ class CheckTariff extends Page
      * @param  string|list<string>  $origin
      * @param  string|list<string>  $destination
      */
-    public function setRoute(string|array $origin, string|array $destination, float $weight = 5, string $service = '', ?string $district = null): void
+    public function setRoute(string|array $origin, string|array $destination, float $weight = 5, string $service = '', ?string $district = null, ?int $qty = null): void
     {
         $this->form->fill([
             'origin' => $this->normalizeOrigins($origin),
             'destination' => $this->normalizeCities($destination),
             'district' => $district,
             'weight' => $weight,
+            'qty' => $qty,
             'service' => $service,
         ]);
 

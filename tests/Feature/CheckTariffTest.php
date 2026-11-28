@@ -140,6 +140,7 @@ class CheckTariffTest extends TestCase
             ->assertSet('data.origin', [])
             ->assertSet('data.destination', [])
             ->assertSet('data.weight', null)
+            ->assertSet('data.qty', null)
             ->assertSet('hasSearched', false)
             ->assertSet('showHistory', false)
             ->assertSee('History')
@@ -216,6 +217,7 @@ class CheckTariffTest extends TestCase
             ->assertSet('data.origin', [])
             ->assertSet('data.destination', [])
             ->assertSet('data.weight', null)
+            ->assertSet('data.qty', null)
             ->assertSet('hasSearched', false)
             ->assertDontSee('Hasil Cek Tarif');
     }
@@ -731,6 +733,119 @@ class CheckTariffTest extends TestCase
         $this->assertSame('JAKARTA', $bothRates[2]['origin']);
         $this->assertSame('KUPANG', $bothRates[2]['destination']);
         $this->assertEquals(40000.0, $bothRates[2]['total_cost']);
+    }
+
+    public function test_check_tariff_qty_multiplies_biaya_ongkir_uniformly_and_persists_in_history(): void
+    {
+        $karya = Expedition::create(['name' => 'KARYA MANDIRI', 'code' => 'KRY', 'is_active' => true]);
+        $rax = Expedition::create(['name' => 'RAX', 'code' => 'RAX', 'is_active' => true]);
+        $express21 = Expedition::create(['name' => '21 EXPRES', 'code' => '21EXP', 'is_active' => true]);
+        $jnt = Expedition::create(['name' => 'J&T CARGO', 'code' => 'JNT', 'is_active' => true]);
+
+        // Per koli: 150.000 × 11 Qty = 1.650.000
+        ExpeditionRateCard::create([
+            'expedition_id' => $karya->id,
+            'origin_depo' => 'BANDUNG',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 150000,
+            'min_kg' => 0,
+            'pricing_type' => ExpeditionRateCard::PRICING_PER_COLLY,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1',
+            'is_active' => true,
+        ]);
+
+        // Per kg: (20 KG × 2.000) × 11 Qty = 440.000
+        ExpeditionRateCard::create([
+            'expedition_id' => $rax->id,
+            'origin_depo' => 'BANDUNG',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 2000,
+            'min_kg' => 3,
+            'pricing_type' => ExpeditionRateCard::PRICING_PER_KG,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1-2',
+            'is_active' => true,
+        ]);
+
+        // Per kg: (20 KG × 5.000) × 11 Qty = 1.100.000
+        ExpeditionRateCard::create([
+            'expedition_id' => $express21->id,
+            'origin_depo' => 'BANDUNG',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 5000,
+            'min_kg' => 1,
+            'pricing_type' => ExpeditionRateCard::PRICING_PER_KG,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1-2',
+            'is_active' => true,
+        ]);
+
+        // Flat: 45.000 × 11 Qty = 495.000
+        ExpeditionRateCard::create([
+            'expedition_id' => $jnt->id,
+            'origin_depo' => 'BANDUNG',
+            'destination_city' => 'JAKARTA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 45000,
+            'min_kg' => 0,
+            'pricing_type' => ExpeditionRateCard::PRICING_FLAT,
+            'insurance_rate_percent' => 0,
+            'sla_days' => '1-3',
+            'is_active' => true,
+        ]);
+
+        $component = Livewire::actingAs($this->user)
+            ->test(CheckTariff::class)
+            ->set('data.origin', ['BANDUNG'])
+            ->set('data.destination', ['JAKARTA'])
+            ->set('data.weight', 20)
+            ->set('data.qty', 11)
+            ->set('data.service', 'DARAT')
+            ->call('checkTariff')
+            ->assertSet('hasSearched', true)
+            ->assertSet('searchedWeight', 20.0)
+            ->assertSet('searchedQty', 11)
+            ->assertSee('20 KG')
+            ->assertSee('11 Qty')
+            ->assertSee('440.000')
+            ->assertSee('495.000')
+            ->assertSee('1.100.000')
+            ->assertSee('1.650.000');
+
+        $rates = $component->get('rates');
+        $this->assertCount(4, $rates);
+        $this->assertSame('RAX', $rates[0]['expedition']);
+        $this->assertEquals(40000.0, $rates[0]['base_ongkir']);
+        $this->assertEquals(440000.0, $rates[0]['total_cost']);
+        $this->assertSame('J&T CARGO', $rates[1]['expedition']);
+        $this->assertEquals(45000.0, $rates[1]['base_ongkir']);
+        $this->assertEquals(495000.0, $rates[1]['total_cost']);
+        $this->assertSame('21 EXPRES', $rates[2]['expedition']);
+        $this->assertEquals(1100000.0, $rates[2]['total_cost']);
+        $this->assertSame('KARYA MANDIRI', $rates[3]['expedition']);
+        $this->assertEquals(1650000.0, $rates[3]['total_cost']);
+        $this->assertStringContainsString('*Total Berat:* 20 KG', $component->get('aiInsights')['whatsapp_text']);
+        $this->assertStringContainsString('*Qty:* 11', $component->get('aiInsights')['whatsapp_text']);
+
+        $history = TariffSearchHistory::query()->latest('id')->first();
+        $this->assertNotNull($history);
+        $this->assertEquals(20.0, (float) $history->weight);
+        $this->assertSame(11, $history->qty);
+
+        Livewire::actingAs($this->user)
+            ->test(CheckTariff::class)
+            ->call('applyHistory', $history->id)
+            ->assertSet('data.weight', 20.0)
+            ->assertSet('data.qty', 11)
+            ->assertSet('searchedWeight', 20.0)
+            ->assertSet('searchedQty', 11)
+            ->assertSee('11 Qty')
+            ->assertSee('440.000')
+            ->assertSee('495.000');
     }
 
     /**

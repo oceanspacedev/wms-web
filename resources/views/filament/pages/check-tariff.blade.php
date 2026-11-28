@@ -144,7 +144,12 @@
 
                                         {{-- Berat & Nilai --}}
                                         <td class="px-4 py-4 text-sm text-gray-950 dark:text-white align-top whitespace-nowrap">
-                                            <div class="font-medium">{{ $item->weight }} KG</div>
+                                            <div class="font-medium">
+                                                {{ $item->weight }} KG
+                                                @if(!empty($item->qty))
+                                                    <span class="text-xs font-normal text-gray-500 dark:text-gray-400">&bull; {{ $item->qty }} Qty</span>
+                                                @endif
+                                            </div>
                                             @if(!empty($item->total_amount))
                                                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                                                     Rp {{ number_format($item->total_amount, 0, ',', '.') }}
@@ -310,7 +315,7 @@
                                 @else
                                     <span class="font-medium text-gray-950 dark:text-white">{{ $searchedDestination }}@if(!empty($searchedDistrict)), Kec. {{ $searchedDistrict }}@endif</span>
                                 @endif
-                                <span class="text-gray-500 dark:text-gray-400">({{ $searchedWeight }} KG)</span>
+                                <span class="text-gray-500 dark:text-gray-400">({{ $searchedWeight }} KG{{ !empty($searchedQty) ? ' • ' . $searchedQty . ' Qty' : '' }})</span>
                                 @if(!empty($searchedTotalAmount))
                                     <span class="text-gray-500 dark:text-gray-400">&bull; Nilai: Rp {{ number_format($searchedTotalAmount, 0, ',', '.') }}</span>
                                 @endif
@@ -361,6 +366,9 @@
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">
                                         Min KG
+                                    </th>
+                                    <th scope="col" class="px-4 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">
+                                        Qty
                                     </th>
                                     <th scope="col" class="px-4 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">
                                         Premi Asuransi
@@ -452,6 +460,11 @@
                                             {{ $rate['min_kg'] ?? '-' }}
                                         </td>
 
+                                        {{-- Qty --}}
+                                        <td class="px-4 py-4 text-sm tabular-nums text-gray-950 dark:text-white align-middle text-center whitespace-nowrap">
+                                            {{ $searchedQty ?? '-' }}
+                                        </td>
+
                                         {{-- Insurance rate percent --}}
                                         <td class="px-4 py-4 text-sm text-gray-950 dark:text-white align-middle text-center whitespace-nowrap">
                                             {{ isset($rate['insurance_percent']) ? number_format($rate['insurance_percent'], 1, ',', '.') . '%' : '0%' }}
@@ -464,7 +477,15 @@
 
                                         {{-- Biaya ongkir --}}
                                         <td class="px-4 py-4 text-sm text-gray-950 dark:text-white align-middle text-end whitespace-nowrap">
-                                            {{ isset($rate['biaya_ongkir']) ? number_format($rate['biaya_ongkir'], 0, ',', '.') : '-' }}
+                                            <div>{{ isset($rate['biaya_ongkir']) ? number_format($rate['biaya_ongkir'], 0, ',', '.') : '-' }}</div>
+                                            @if(!empty($searchedQty) && $searchedQty > 1 && isset($rate['biaya_ongkir']))
+                                                @php
+                                                    $baseOngkir = (float) ($rate['base_ongkir'] ?? ($rate['biaya_ongkir'] / max(1, $searchedQty)));
+                                                @endphp
+                                                <div class="text-[11px] text-gray-400 dark:text-gray-500">
+                                                    {{ number_format($baseOngkir, 0, ',', '.') }} &times; {{ $searchedQty }} Qty
+                                                </div>
+                                            @endif
                                         </td>
 
                                         {{-- Total biaya --}}
@@ -519,7 +540,7 @@
                                 @foreach($suggested as $dest)
                                     <button 
                                         type="button" 
-                                        wire:click="setRoute({{ \Illuminate\Support\Js::from($searchedOrigins !== [] ? $searchedOrigins : [$searchedOrigin]) }}, {{ \Illuminate\Support\Js::from($dest) }}, {{ $searchedWeight }}, '')"
+                                        wire:click="setRoute({{ \Illuminate\Support\Js::from($searchedOrigins !== [] ? $searchedOrigins : [$searchedOrigin]) }}, {{ \Illuminate\Support\Js::from($dest) }}, {{ $searchedWeight }}, '', null, {{ \Illuminate\Support\Js::from($searchedQty) }})"
                                         class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-white/10 dark:hover:bg-white/15 dark:text-gray-200 transition cursor-pointer"
                                     >
                                         {{ $dest }} &rarr;

@@ -21,6 +21,7 @@ class TariffSearchHistory extends Model
         'destination',
         'district',
         'weight',
+        'qty',
         'service',
         'total_results',
         'cheapest_expedition',
@@ -41,6 +42,7 @@ class TariffSearchHistory extends Model
     {
         return [
             'weight' => 'float',
+            'qty' => 'integer',
             'total_amount' => 'float',
             'cheapest_cost' => 'float',
             'total_results' => 'integer',
@@ -62,18 +64,19 @@ class TariffSearchHistory extends Model
             $service = app(FreightRateGoogleSheetService::class);
             $origins = array_values(array_filter(array_map('trim', explode(',', (string) $this->origin))));
             $destinations = array_values(array_filter(array_map('trim', explode(',', (string) $this->destination))));
+            $effectiveQty = max(1, (int) ($this->qty ?? 1));
             $summary = [];
 
             foreach ($origins as $origin) {
                 foreach ($destinations as $destination) {
-                    $rates = $service->compareRates($origin, $destination, $this->weight, $this->service);
+                    $rates = $service->compareRates($origin, $destination, (float) $this->weight, $this->service);
                     foreach ($rates as $r) {
                         $summary[] = [
                             'origin' => $origin,
                             'destination' => $destination,
                             'expedition' => (string) $r['expedition'],
                             'service' => (string) $r['service'],
-                            'total_cost' => $r['total_cost'],
+                            'total_cost' => (float) $r['total_cost'] * $effectiveQty,
                         ];
                     }
                 }

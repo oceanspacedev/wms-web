@@ -13,6 +13,7 @@ use App\Models\ExpeditionRateCard;
 use App\Models\RateCardImport;
 use App\Models\User;
 use App\Services\RateCardImportService;
+use BezhanSalleh\FilamentShield\Facades\FilamentShield;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Exception;
 use Filament\Actions\Testing\TestAction;
@@ -147,8 +148,8 @@ class RateCardImportTest extends TestCase
 
         Livewire::actingAs($this->user)
             ->test(CheckTariff::class)
-            ->set('data.origin', 'JAKARTA')
-            ->set('data.destination', 'SEMARANG')
+            ->set('data.origin', ['JAKARTA'])
+            ->set('data.destination', ['SEMARANG'])
             ->set('data.weight', 20)
             ->set('data.service', 'DARAT')
             ->call('checkTariff')
@@ -358,6 +359,64 @@ class RateCardImportTest extends TestCase
             ->filterTable('origin_depo', 'BANDUNG')
             ->assertCanSeeTableRecords([$bandung])
             ->assertCanNotSeeTableRecords([$cirebon]);
+    }
+
+    public function test_rate_cards_table_can_filter_by_destination_city(): void
+    {
+        $expedition = Expedition::create(['name' => 'RAX', 'code' => 'RAX', 'is_active' => true]);
+
+        $surabaya = ExpeditionRateCard::create([
+            'expedition_id' => $expedition->id,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'SURABAYA',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 3000,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0.2,
+            'is_active' => true,
+        ]);
+
+        $medan = ExpeditionRateCard::create([
+            'expedition_id' => $expedition->id,
+            'origin_depo' => 'JAKARTA',
+            'destination_city' => 'MEDAN',
+            'service_type' => 'DARAT',
+            'rate_per_kg' => 5500,
+            'min_kg' => 1,
+            'insurance_rate_percent' => 0.2,
+            'is_active' => true,
+        ]);
+
+        Livewire::actingAs($this->user)
+            ->test(ManageExpeditionRateCards::class)
+            ->assertCanSeeTableRecords([$surabaya, $medan])
+            ->filterTable('destination_city', 'SURABAYA')
+            ->assertCanSeeTableRecords([$surabaya])
+            ->assertCanNotSeeTableRecords([$medan]);
+    }
+
+    public function test_rate_card_import_follows_rate_card_create_permission_and_is_exposed_in_shield(): void
+    {
+        $customPermissions = FilamentShield::getCustomPermissions();
+        $this->assertArrayHasKey('ViewAny:RateCardImport', $customPermissions);
+        $this->assertArrayHasKey('Create:RateCardImport', $customPermissions);
+        $this->assertArrayHasKey('Delete:RateCardImport', $customPermissions);
+
+        Permission::firstOrCreate(['name' => 'Create:ExpeditionRateCard', 'guard_name' => 'web']);
+
+        $viewer = User::factory()->create();
+        $viewer->givePermissionTo(['ViewAny:ExpeditionRateCard']);
+
+        Livewire::actingAs($viewer)
+            ->test(ManageExpeditionRateCards::class)
+            ->assertActionHidden('importRateCards');
+
+        $editor = User::factory()->create();
+        $editor->givePermissionTo(['ViewAny:ExpeditionRateCard', 'Create:ExpeditionRateCard']);
+
+        Livewire::actingAs($editor)
+            ->test(ManageExpeditionRateCards::class)
+            ->assertActionVisible('importRateCards');
     }
 
     private function pendingImport(string $path): RateCardImport
